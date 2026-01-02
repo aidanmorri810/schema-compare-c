@@ -246,6 +246,8 @@ SchemaDiff *compare_schemas(CreateTableStmt **source_tables, int source_count,
             TableDiff *diff = table_diff_create(target->table_name);
             if (diff) {
                 diff->table_added = true;
+                diff->target_table = target;  /* Store target table definition */
+                diff->source_table = NULL;
                 result->tables_added++;
 
                 /* Link into list */
@@ -292,6 +294,8 @@ SchemaDiff *compare_schemas(CreateTableStmt **source_tables, int source_count,
             TableDiff *diff = table_diff_create(source->table_name);
             if (diff) {
                 diff->table_removed = true;
+                diff->source_table = source;  /* Store source table definition */
+                diff->target_table = NULL;
                 result->tables_removed++;
 
                 /* Link into list */

@@ -46,6 +46,8 @@ char *quote_identifier(const char *identifier) {
 
     /* Check if identifier needs quoting */
     bool needs_quote = false;
+
+    /* Check if it contains special characters (except underscore) */
     for (const char *p = identifier; *p; p++) {
         if (!isalnum(*p) && *p != '_') {
             needs_quote = true;
@@ -53,12 +55,12 @@ char *quote_identifier(const char *identifier) {
         }
     }
 
-    /* Check if it's a reserved word (simplified check) */
-    if (!needs_quote) {
-        /* Just quote everything for safety */
+    /* Check if it starts with a digit */
+    if (!needs_quote && isdigit(identifier[0])) {
         needs_quote = true;
     }
 
+    /* Don't quote if not necessary */
     if (!needs_quote) {
         return strdup(identifier);
     }
@@ -331,6 +333,335 @@ char *generate_alter_column_default_sql(const char *table_name, const ColumnDiff
     return result;
 }
 
+/* Helper: Generate constraint name or empty string */
+static char *format_constraint_name(const char *name) {
+    if (!name) {
+        return strdup("");
+    }
+    char *quoted = quote_identifier(name);
+    if (!quoted) {
+        return strdup("");
+    }
+    char *result = malloc(strlen(quoted) + 20);
+    if (!result) {
+        free(quoted);
+        return strdup("");
+    }
+    sprintf(result, "CONSTRAINT %s ", quoted);
+    free(quoted);
+    return result;
+}
+
+/* Helper: Generate column constraint SQL */
+static char *generate_column_constraint(const ColumnConstraint *cc) {
+    if (!cc) {
+        return NULL;
+    }
+
+    StringBuilder *sb = sb_create();
+    if (!sb) {
+        return NULL;
+    }
+
+    char *constraint_name = format_constraint_name(cc->constraint_name);
+    if (constraint_name) {
+        sb_append(sb, constraint_name);
+        free(constraint_name);
+    }
+
+    switch (cc->type) {
+        case CONSTRAINT_NOT_NULL:
+            sb_append(sb, "NOT NULL");
+            break;
+        case CONSTRAINT_NULL:
+            sb_append(sb, "NULL");
+            break;
+        case CONSTRAINT_DEFAULT:
+            sb_append(sb, "DEFAULT ");
+            if (cc->constraint.default_val.expr && cc->constraint.default_val.expr->expression) {
+                sb_append(sb, cc->constraint.default_val.expr->expression);
+            }
+            break;
+        case CONSTRAINT_CHECK:
+            sb_append(sb, "CHECK (");
+            if (cc->constraint.check.expr && cc->constraint.check.expr->expression) {
+                sb_append(sb, cc->constraint.check.expr->expression);
+            }
+            sb_append(sb, ")");
+            break;
+        case CONSTRAINT_UNIQUE:
+            sb_append(sb, "UNIQUE");
+            break;
+        case CONSTRAINT_PRIMARY_KEY:
+            sb_append(sb, "PRIMARY KEY");
+            break;
+        case CONSTRAINT_REFERENCES:
+            sb_append(sb, "REFERENCES ");
+            if (cc->constraint.references.reftable) {
+                char *quoted_table = quote_identifier(cc->constraint.references.reftable);
+                sb_append(sb, quoted_table);
+                free(quoted_table);
+            }
+            if (cc->constraint.references.refcolumn) {
+                sb_append(sb, " (");
+                char *quoted_col = quote_identifier(cc->constraint.references.refcolumn);
+                sb_append(sb, quoted_col);
+                free(quoted_col);
+                sb_append(sb, ")");
+            }
+            if (cc->constraint.references.has_on_delete) {
+                sb_append(sb, " ON DELETE ");
+                switch (cc->constraint.references.on_delete) {
+                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
+                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
+                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
+                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
+                    default: sb_append(sb, "NO ACTION"); break;
+                }
+            }
+            if (cc->constraint.references.has_on_update) {
+                sb_append(sb, " ON UPDATE ");
+                switch (cc->constraint.references.on_update) {
+                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
+                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
+                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
+                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
+                    default: sb_append(sb, "NO ACTION"); break;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+
+    char *result = sb_to_string(sb);
+    sb_free(sb);
+    return result;
+}
+
+/* Helper: Generate table constraint SQL */
+static char *generate_table_constraint(const TableConstraint *tc) {
+    if (!tc) {
+        return NULL;
+    }
+
+    StringBuilder *sb = sb_create();
+    if (!sb) {
+        return NULL;
+    }
+
+    char *constraint_name = format_constraint_name(tc->constraint_name);
+    if (constraint_name) {
+        sb_append(sb, constraint_name);
+        free(constraint_name);
+    }
+
+    switch (tc->type) {
+        case TABLE_CONSTRAINT_PRIMARY_KEY:
+            sb_append(sb, "PRIMARY KEY (");
+            for (int i = 0; i < tc->constraint.primary_key.column_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                char *quoted = quote_identifier(tc->constraint.primary_key.columns[i]);
+                sb_append(sb, quoted);
+                free(quoted);
+            }
+            sb_append(sb, ")");
+            break;
+        case TABLE_CONSTRAINT_UNIQUE:
+            sb_append(sb, "UNIQUE (");
+            for (int i = 0; i < tc->constraint.unique.column_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                char *quoted = quote_identifier(tc->constraint.unique.columns[i]);
+                sb_append(sb, quoted);
+                free(quoted);
+            }
+            sb_append(sb, ")");
+            break;
+        case TABLE_CONSTRAINT_FOREIGN_KEY:
+            sb_append(sb, "FOREIGN KEY (");
+            for (int i = 0; i < tc->constraint.foreign_key.column_count; i++) {
+                if (i > 0) sb_append(sb, ", ");
+                char *quoted = quote_identifier(tc->constraint.foreign_key.columns[i]);
+                sb_append(sb, quoted);
+                free(quoted);
+            }
+            sb_append(sb, ") REFERENCES ");
+            if (tc->constraint.foreign_key.reftable) {
+                char *quoted_table = quote_identifier(tc->constraint.foreign_key.reftable);
+                sb_append(sb, quoted_table);
+                free(quoted_table);
+            }
+            if (tc->constraint.foreign_key.refcolumn_count > 0) {
+                sb_append(sb, " (");
+                for (int i = 0; i < tc->constraint.foreign_key.refcolumn_count; i++) {
+                    if (i > 0) sb_append(sb, ", ");
+                    char *quoted = quote_identifier(tc->constraint.foreign_key.refcolumns[i]);
+                    sb_append(sb, quoted);
+                    free(quoted);
+                }
+                sb_append(sb, ")");
+            }
+            if (tc->constraint.foreign_key.has_on_delete) {
+                sb_append(sb, " ON DELETE ");
+                switch (tc->constraint.foreign_key.on_delete) {
+                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
+                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
+                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
+                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
+                    default: sb_append(sb, "NO ACTION"); break;
+                }
+            }
+            if (tc->constraint.foreign_key.has_on_update) {
+                sb_append(sb, " ON UPDATE ");
+                switch (tc->constraint.foreign_key.on_update) {
+                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
+                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
+                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
+                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
+                    default: sb_append(sb, "NO ACTION"); break;
+                }
+            }
+            break;
+        case TABLE_CONSTRAINT_CHECK:
+            sb_append(sb, "CHECK (");
+            if (tc->constraint.check.expr && tc->constraint.check.expr->expression) {
+                sb_append(sb, tc->constraint.check.expr->expression);
+            }
+            sb_append(sb, ")");
+            break;
+        default:
+            break;
+    }
+
+    char *result = sb_to_string(sb);
+    sb_free(sb);
+    return result;
+}
+
+/* Generate CREATE TABLE SQL */
+char *generate_create_table_sql(const CreateTableStmt *stmt, const SQLGenOptions *opts) {
+    if (!stmt || !stmt->table_name) {
+        return NULL;
+    }
+
+    StringBuilder *sb = sb_create();
+    if (!sb) {
+        return NULL;
+    }
+
+    if (opts->add_comments) {
+        sb_append(sb, "-- Create table ");
+        sb_append(sb, stmt->table_name);
+        sb_append(sb, "\n");
+    }
+
+    sb_append(sb, "CREATE ");
+
+    /* Table type modifiers */
+    if (stmt->table_type == TABLE_TYPE_TEMPORARY || stmt->table_type == TABLE_TYPE_TEMP) {
+        sb_append(sb, "TEMPORARY ");
+    } else if (stmt->table_type == TABLE_TYPE_UNLOGGED) {
+        sb_append(sb, "UNLOGGED ");
+    }
+
+    sb_append(sb, "TABLE ");
+
+    if (stmt->if_not_exists) {
+        sb_append(sb, "IF NOT EXISTS ");
+    }
+
+    char *quoted_table = quote_identifier(stmt->table_name);
+    sb_append(sb, quoted_table);
+    free(quoted_table);
+
+    /* Handle different table variants */
+    if (stmt->variant == CREATE_TABLE_REGULAR && stmt->table_def.regular.elements) {
+        sb_append(sb, " (\n");
+
+        bool first = true;
+        for (TableElement *elem = stmt->table_def.regular.elements; elem; elem = elem->next) {
+            if (!first) {
+                sb_append(sb, ",\n");
+            }
+            first = false;
+
+            sb_append(sb, "    ");
+
+            if (elem->type == TABLE_ELEM_COLUMN) {
+                ColumnDef *col = &elem->elem.column;
+
+                /* Column name and type */
+                char *quoted_col = quote_identifier(col->column_name);
+                sb_append(sb, quoted_col);
+                free(quoted_col);
+
+                sb_append(sb, " ");
+                sb_append(sb, col->data_type ? col->data_type : "text");
+
+                /* Column constraints */
+                for (ColumnConstraint *cc = col->constraints; cc; cc = cc->next) {
+                    sb_append(sb, " ");
+                    char *constraint_sql = generate_column_constraint(cc);
+                    if (constraint_sql) {
+                        sb_append(sb, constraint_sql);
+                        free(constraint_sql);
+                    }
+                }
+            } else if (elem->type == TABLE_ELEM_TABLE_CONSTRAINT) {
+                char *constraint_sql = generate_table_constraint(elem->elem.table_constraint);
+                if (constraint_sql) {
+                    sb_append(sb, constraint_sql);
+                    free(constraint_sql);
+                }
+            }
+        }
+
+        sb_append(sb, "\n)");
+    } else {
+        sb_append(sb, " ()");
+    }
+
+    /* INHERITS clause */
+    if (stmt->variant == CREATE_TABLE_REGULAR && stmt->table_def.regular.inherits_count > 0) {
+        sb_append(sb, " INHERITS (");
+        for (int i = 0; i < stmt->table_def.regular.inherits_count; i++) {
+            if (i > 0) sb_append(sb, ", ");
+            char *quoted = quote_identifier(stmt->table_def.regular.inherits[i]);
+            sb_append(sb, quoted);
+            free(quoted);
+        }
+        sb_append(sb, ")");
+    }
+
+    /* WITH options */
+    if (stmt->with_options && stmt->with_options->count > 0) {
+        sb_append(sb, " WITH (");
+        for (int i = 0; i < stmt->with_options->count; i++) {
+            if (i > 0) sb_append(sb, ", ");
+            sb_append(sb, stmt->with_options->parameters[i].name);
+            if (stmt->with_options->parameters[i].value) {
+                sb_append(sb, "=");
+                sb_append(sb, stmt->with_options->parameters[i].value);
+            }
+        }
+        sb_append(sb, ")");
+    }
+
+    /* TABLESPACE */
+    if (stmt->tablespace_name) {
+        sb_append(sb, " TABLESPACE ");
+        char *quoted_ts = quote_identifier(stmt->tablespace_name);
+        sb_append(sb, quoted_ts);
+        free(quoted_ts);
+    }
+
+    sb_append(sb, ";\n");
+
+    char *result = sb_to_string(sb);
+    sb_free(sb);
+    return result;
+}
+
 /* Generate DROP TABLE SQL */
 char *generate_drop_table_sql(const char *table_name, const SQLGenOptions *opts) {
     if (!table_name) {
@@ -417,11 +748,22 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
             continue;
         }
 
-        /* Handle added tables - TODO: need CreateTableStmt */
+        /* Handle added tables */
         if (td->table_added) {
-            if (opts->add_comments) {
-                sb_append_fmt(sb, "-- TODO: CREATE TABLE %s\n", td->table_name);
-                sb_append(sb, "-- (Table definition not available in diff)\n\n");
+            if (td->target_table) {
+                char *create_sql = generate_create_table_sql(td->target_table, opts);
+                if (create_sql) {
+                    sb_append(sb, create_sql);
+                    sb_append(sb, "\n");
+                    free(create_sql);
+                    stmt_count++;
+                }
+            } else {
+                /* Fallback if table definition not available */
+                if (opts->add_comments) {
+                    sb_append_fmt(sb, "-- TODO: CREATE TABLE %s\n", td->table_name);
+                    sb_append(sb, "-- (Table definition not available in diff)\n\n");
+                }
             }
             continue;
         }

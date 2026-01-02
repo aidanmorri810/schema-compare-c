@@ -21,6 +21,10 @@ TableDiff *compare_tables(const CreateTableStmt *source, const CreateTableStmt *
         return NULL;
     }
 
+    /* Store table definitions for SQL generation */
+    result->source_table = (CreateTableStmt *)source;
+    result->target_table = (CreateTableStmt *)target;
+
     bool has_changes = false;
 
     /* Compare table types (TEMPORARY, UNLOGGED, etc.) */

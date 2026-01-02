@@ -28,6 +28,7 @@ typedef struct {
         char *file_path;         /* For SOURCE_TYPE_FILE */
         char *directory_path;    /* For SOURCE_TYPE_DIRECTORY */
     } source;
+    char *database_name;         /* Database name (extracted from directory or connection) */
     char *schema_name;           /* Schema name (for database sources) */
 } SchemaSource;
 
@@ -55,6 +56,10 @@ void app_context_free(AppContext *ctx);
 
 /* Parse command line arguments */
 AppContext *parse_command_line(int argc, char **argv);
+
+/* Parse schema source specification */
+SchemaSource *parse_schema_source(const char *spec);
+void schema_source_free(SchemaSource *source);
 
 /* Print usage information */
 void print_usage(const char *program_name);

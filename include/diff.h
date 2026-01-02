@@ -110,6 +110,10 @@ typedef struct TableDiff {
     char *old_tablespace;
     char *new_tablespace;
 
+    /* Table definitions for added/removed tables and SQL generation */
+    CreateTableStmt *source_table;  /* NULL if table was added */
+    CreateTableStmt *target_table;  /* NULL if table was removed */
+
     /* Detailed column differences */
     ColumnDiff *columns_added;
     ColumnDiff *columns_removed;
