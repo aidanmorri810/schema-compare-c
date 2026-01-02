@@ -170,8 +170,20 @@ typedef struct {
 } ExcludeElement;
 
 typedef struct {
-    int count;
-    char **names;
+    bool has_increment;
+    long increment_by;
+    bool has_start;
+    long start_with;
+    bool has_minvalue;
+    bool is_no_minvalue;
+    long minvalue;
+    bool has_maxvalue;
+    bool is_no_maxvalue;
+    long maxvalue;
+    bool has_cache;
+    long cache;
+    bool has_cycle;
+    bool cycle;
 } SequenceOptions;
 
 typedef struct {

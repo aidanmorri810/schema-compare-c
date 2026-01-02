@@ -246,7 +246,185 @@ CreateTableStmt *parser_parse_create_table(Parser *parser) {
         stmt->table_def.regular.inherits = NULL;
         stmt->table_def.regular.inherits_count = 0;
 
-        /* TODO: Parse INHERITS, PARTITION BY, USING, WITH, TABLESPACE, ON COMMIT */
+        /* Parse INHERITS clause */
+        if (parser_match(parser, TOKEN_INHERITS)) {
+            if (!parser_expect(parser, TOKEN_LPAREN, "Expected '(' after INHERITS")) {
+                return NULL;
+            }
+
+            /* Count inherited tables */
+            int capacity = 4;
+            char **inherits = malloc(sizeof(char *) * capacity);
+            int count = 0;
+
+            do {
+                if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+                    parser_error(parser, "Expected table name in INHERITS clause");
+                    return NULL;
+                }
+
+                if (count >= capacity) {
+                    capacity *= 2;
+                    char **new_inherits = malloc(sizeof(char *) * capacity);
+                    if (!new_inherits) {
+                        parser_error(parser, "Out of memory");
+                        return NULL;
+                    }
+                    memcpy(new_inherits, inherits, sizeof(char *) * count);
+                    free(inherits);
+                    inherits = new_inherits;
+                }
+
+                inherits[count++] = strdup(parser->current.lexeme);
+                parser_advance(parser);
+            } while (parser_match(parser, TOKEN_COMMA));
+
+            if (!parser_expect(parser, TOKEN_RPAREN, "Expected ')' after INHERITS list")) {
+                return NULL;
+            }
+
+            stmt->table_def.regular.inherits = inherits;
+            stmt->table_def.regular.inherits_count = count;
+        }
+
+        /* Parse PARTITION BY clause */
+        stmt->partition_by = parse_partition_by(parser);
+
+        /* Parse USING method (for access method) */
+        if (parser_match(parser, TOKEN_USING)) {
+            if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+                parser_error(parser, "Expected access method name after USING");
+                return NULL;
+            }
+            stmt->using_method = strdup(parser->current.lexeme);
+            parser_advance(parser);
+        } else {
+            stmt->using_method = NULL;
+        }
+
+        /* Parse WITH options or WITHOUT OIDS */
+        stmt->with_options = NULL;
+        stmt->without_oids = false;
+
+        if (parser_match(parser, TOKEN_WITH)) {
+            if (parser_match(parser, TOKEN_OIDS)) {
+                /* WITH OIDS - deprecated but still parsed */
+                stmt->without_oids = false;
+            } else if (parser_check(parser, TOKEN_LPAREN)) {
+                /* WITH (...) storage options */
+                /* parse_with_options expects WITH to already be consumed, so we need to parse manually */
+                if (!parser_expect(parser, TOKEN_LPAREN, "Expected '(' after WITH")) {
+                    return NULL;
+                }
+
+                StorageParameterList *list = calloc(1, sizeof(StorageParameterList));
+                if (!list) {
+                    parser_error(parser, "Out of memory");
+                    return NULL;
+                }
+
+                int capacity = 4;
+                list->parameters = calloc(capacity, sizeof(StorageParameter));
+                if (!list->parameters) {
+                    parser_error(parser, "Out of memory");
+                    return NULL;
+                }
+                list->count = 0;
+
+                do {
+                    if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+                        parser_error(parser, "Expected storage parameter name");
+                        return NULL;
+                    }
+
+                    if (list->count >= capacity) {
+                        capacity *= 2;
+                        StorageParameter *new_params = calloc(capacity, sizeof(StorageParameter));
+                        if (!new_params) {
+                            parser_error(parser, "Out of memory");
+                            return NULL;
+                        }
+                        memcpy(new_params, list->parameters, sizeof(StorageParameter) * list->count);
+                        free(list->parameters);
+                        list->parameters = new_params;
+                    }
+
+                    list->parameters[list->count].name = strdup(parser->current.lexeme);
+                    parser_advance(parser);
+
+                    if (!parser_expect(parser, TOKEN_EQUAL, "Expected '=' after parameter name")) {
+                        return NULL;
+                    }
+
+                    /* Parameter value can be identifier, number, or string */
+                    if (parser_check(parser, TOKEN_IDENTIFIER) ||
+                        parser_check(parser, TOKEN_NUMBER) ||
+                        parser_check(parser, TOKEN_STRING_LITERAL)) {
+                        list->parameters[list->count].value = strdup(parser->current.lexeme);
+                        parser_advance(parser);
+                    } else {
+                        parser_error(parser, "Expected parameter value");
+                        return NULL;
+                    }
+
+                    list->count++;
+                } while (parser_match(parser, TOKEN_COMMA));
+
+                if (!parser_expect(parser, TOKEN_RPAREN, "Expected ')' after WITH options")) {
+                    return NULL;
+                }
+
+                stmt->with_options = list;
+            } else {
+                parser_error(parser, "Expected OIDS or '(' after WITH");
+                return NULL;
+            }
+        } else if (parser_match(parser, TOKEN_WITHOUT)) {
+            if (!parser_expect(parser, TOKEN_OIDS, "Expected OIDS after WITHOUT")) {
+                return NULL;
+            }
+            stmt->without_oids = true;
+        }
+
+        /* Parse ON COMMIT clause */
+        stmt->has_on_commit = false;
+        if (parser_match(parser, TOKEN_ON)) {
+            if (!parser_expect(parser, TOKEN_COMMIT, "Expected COMMIT after ON")) {
+                return NULL;
+            }
+
+            if (parser_match(parser, TOKEN_PRESERVE)) {
+                if (!parser_expect(parser, TOKEN_ROWS, "Expected ROWS after PRESERVE")) {
+                    return NULL;
+                }
+                stmt->on_commit = ON_COMMIT_PRESERVE_ROWS;
+                stmt->has_on_commit = true;
+            } else if (parser_match(parser, TOKEN_DELETE)) {
+                if (!parser_expect(parser, TOKEN_ROWS, "Expected ROWS after DELETE")) {
+                    return NULL;
+                }
+                stmt->on_commit = ON_COMMIT_DELETE_ROWS;
+                stmt->has_on_commit = true;
+            } else if (parser_match(parser, TOKEN_DROP)) {
+                stmt->on_commit = ON_COMMIT_DROP;
+                stmt->has_on_commit = true;
+            } else {
+                parser_error(parser, "Expected PRESERVE ROWS, DELETE ROWS, or DROP after ON COMMIT");
+                return NULL;
+            }
+        }
+
+        /* Parse TABLESPACE clause */
+        if (parser_match(parser, TOKEN_TABLESPACE)) {
+            if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+                parser_error(parser, "Expected tablespace name after TABLESPACE");
+                return NULL;
+            }
+            stmt->tablespace_name = strdup(parser->current.lexeme);
+            parser_advance(parser);
+        } else {
+            stmt->tablespace_name = NULL;
+        }
     }
 
     /* Consume optional semicolon to terminate the statement */

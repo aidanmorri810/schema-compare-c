@@ -65,14 +65,53 @@ bool column_constraints_equivalent(const ColumnConstraint *c1, const ColumnConst
             /* For column-level unique/pk, just type match */
             return true;
 
-        case CONSTRAINT_REFERENCES:
+        case CONSTRAINT_REFERENCES: {
             /* Compare foreign key details */
-            if (!names_equal(c1->constraint.references.reftable,
-                           c2->constraint.references.reftable, opts)) {
+            const ReferencesConstraint *ref1 = &c1->constraint.references;
+            const ReferencesConstraint *ref2 = &c2->constraint.references;
+
+            /* Compare referenced table */
+            if (!names_equal(ref1->reftable, ref2->reftable, opts)) {
                 return false;
             }
-            /* TODO: Compare column mappings */
+
+            /* Compare referenced column */
+            if (!names_equal(ref1->refcolumn, ref2->refcolumn, opts)) {
+                return false;
+            }
+
+            /* Compare match type if specified */
+            if (ref1->has_match_type || ref2->has_match_type) {
+                if (ref1->has_match_type != ref2->has_match_type) {
+                    return false;
+                }
+                if (ref1->match_type != ref2->match_type) {
+                    return false;
+                }
+            }
+
+            /* Compare ON DELETE action */
+            if (ref1->has_on_delete || ref2->has_on_delete) {
+                if (ref1->has_on_delete != ref2->has_on_delete) {
+                    return false;
+                }
+                if (ref1->on_delete != ref2->on_delete) {
+                    return false;
+                }
+            }
+
+            /* Compare ON UPDATE action */
+            if (ref1->has_on_update || ref2->has_on_update) {
+                if (ref1->has_on_update != ref2->has_on_update) {
+                    return false;
+                }
+                if (ref1->on_update != ref2->on_update) {
+                    return false;
+                }
+            }
+
             return true;
+        }
 
         default:
             return false;
@@ -110,19 +149,263 @@ bool constraints_equivalent(const TableConstraint *c1, const TableConstraint *c2
             return expressions_equal(c1->constraint.check.expr->expression,
                                    c2->constraint.check.expr->expression, opts);
 
-        case TABLE_CONSTRAINT_UNIQUE:
-        case TABLE_CONSTRAINT_PRIMARY_KEY:
-            /* TODO: Compare column lists */
-            /* For now, just check if both exist */
-            return true;
+        case TABLE_CONSTRAINT_UNIQUE: {
+            const TableUniqueConstraint *uniq1 = &c1->constraint.unique;
+            const TableUniqueConstraint *uniq2 = &c2->constraint.unique;
 
-        case TABLE_CONSTRAINT_FOREIGN_KEY:
-            /* TODO: Compare foreign key column mappings and references */
-            return true;
+            /* Compare column counts */
+            if (uniq1->column_count != uniq2->column_count) {
+                return false;
+            }
 
-        case TABLE_CONSTRAINT_EXCLUDE:
-            /* TODO: Compare EXCLUDE elements */
+            /* Compare columns */
+            for (int i = 0; i < uniq1->column_count; i++) {
+                if (!names_equal(uniq1->columns[i], uniq2->columns[i], opts)) {
+                    return false;
+                }
+            }
+
+            /* Compare without overlaps column */
+            if (!names_equal(uniq1->without_overlaps_column, uniq2->without_overlaps_column, opts)) {
+                return false;
+            }
+
+            /* Compare NULLS DISTINCT if specified */
+            if (uniq1->has_nulls_distinct || uniq2->has_nulls_distinct) {
+                if (uniq1->has_nulls_distinct != uniq2->has_nulls_distinct) {
+                    return false;
+                }
+                if (uniq1->nulls_distinct != uniq2->nulls_distinct) {
+                    return false;
+                }
+            }
+
+            /* Note: We don't compare index_params (storage options) as they're typically
+             * considered implementation details rather than logical constraint differences */
             return true;
+        }
+
+        case TABLE_CONSTRAINT_PRIMARY_KEY: {
+            const TablePrimaryKeyConstraint *pk1 = &c1->constraint.primary_key;
+            const TablePrimaryKeyConstraint *pk2 = &c2->constraint.primary_key;
+
+            /* Compare column counts */
+            if (pk1->column_count != pk2->column_count) {
+                return false;
+            }
+
+            /* Compare columns */
+            for (int i = 0; i < pk1->column_count; i++) {
+                if (!names_equal(pk1->columns[i], pk2->columns[i], opts)) {
+                    return false;
+                }
+            }
+
+            /* Compare without overlaps column */
+            if (!names_equal(pk1->without_overlaps_column, pk2->without_overlaps_column, opts)) {
+                return false;
+            }
+
+            /* Note: We don't compare index_params (storage options) as they're typically
+             * considered implementation details rather than logical constraint differences */
+            return true;
+        }
+
+        case TABLE_CONSTRAINT_FOREIGN_KEY: {
+            const ForeignKeyConstraint *fk1 = &c1->constraint.foreign_key;
+            const ForeignKeyConstraint *fk2 = &c2->constraint.foreign_key;
+
+            /* Compare referenced table */
+            if (!names_equal(fk1->reftable, fk2->reftable, opts)) {
+                return false;
+            }
+
+            /* Compare column counts */
+            if (fk1->column_count != fk2->column_count) {
+                return false;
+            }
+
+            /* Compare local columns */
+            for (int i = 0; i < fk1->column_count; i++) {
+                if (!names_equal(fk1->columns[i], fk2->columns[i], opts)) {
+                    return false;
+                }
+            }
+
+            /* Compare referenced column counts */
+            if (fk1->refcolumn_count != fk2->refcolumn_count) {
+                return false;
+            }
+
+            /* Compare referenced columns */
+            for (int i = 0; i < fk1->refcolumn_count; i++) {
+                if (!names_equal(fk1->refcolumns[i], fk2->refcolumns[i], opts)) {
+                    return false;
+                }
+            }
+
+            /* Compare period columns */
+            if (!names_equal(fk1->period_column, fk2->period_column, opts)) {
+                return false;
+            }
+
+            if (!names_equal(fk1->ref_period_column, fk2->ref_period_column, opts)) {
+                return false;
+            }
+
+            /* Compare match type if specified */
+            if (fk1->has_match_type || fk2->has_match_type) {
+                if (fk1->has_match_type != fk2->has_match_type) {
+                    return false;
+                }
+                if (fk1->match_type != fk2->match_type) {
+                    return false;
+                }
+            }
+
+            /* Compare ON DELETE action */
+            if (fk1->has_on_delete || fk2->has_on_delete) {
+                if (fk1->has_on_delete != fk2->has_on_delete) {
+                    return false;
+                }
+                if (fk1->on_delete != fk2->on_delete) {
+                    return false;
+                }
+            }
+
+            /* Compare ON UPDATE action */
+            if (fk1->has_on_update || fk2->has_on_update) {
+                if (fk1->has_on_update != fk2->has_on_update) {
+                    return false;
+                }
+                if (fk1->on_update != fk2->on_update) {
+                    return false;
+                }
+            }
+
+            /* Compare ON DELETE SET column counts */
+            if (fk1->on_delete_column_count != fk2->on_delete_column_count) {
+                return false;
+            }
+
+            /* Compare ON DELETE SET columns */
+            for (int i = 0; i < fk1->on_delete_column_count; i++) {
+                if (!names_equal(fk1->on_delete_columns[i], fk2->on_delete_columns[i], opts)) {
+                    return false;
+                }
+            }
+
+            /* Compare ON UPDATE SET column counts */
+            if (fk1->on_update_column_count != fk2->on_update_column_count) {
+                return false;
+            }
+
+            /* Compare ON UPDATE SET columns */
+            for (int i = 0; i < fk1->on_update_column_count; i++) {
+                if (!names_equal(fk1->on_update_columns[i], fk2->on_update_columns[i], opts)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        case TABLE_CONSTRAINT_EXCLUDE: {
+            const ExcludeConstraint *excl1 = &c1->constraint.exclude;
+            const ExcludeConstraint *excl2 = &c2->constraint.exclude;
+
+            /* Compare index method */
+            if (!names_equal(excl1->index_method, excl2->index_method, opts)) {
+                return false;
+            }
+
+            /* Compare element counts */
+            if (excl1->element_count != excl2->element_count) {
+                return false;
+            }
+
+            /* Compare each exclude element */
+            for (int i = 0; i < excl1->element_count; i++) {
+                const ExcludeElement *elem1 = &excl1->elements[i];
+                const ExcludeElement *elem2 = &excl2->elements[i];
+
+                /* Compare column name */
+                if (!names_equal(elem1->column_name, elem2->column_name, opts)) {
+                    return false;
+                }
+
+                /* Compare expression if present */
+                if (elem1->expression || elem2->expression) {
+                    if (!elem1->expression || !elem2->expression) {
+                        return false;
+                    }
+                    if (!expressions_equal(elem1->expression->expression,
+                                         elem2->expression->expression, opts)) {
+                        return false;
+                    }
+                }
+
+                /* Compare collation */
+                if (!names_equal(elem1->collation, elem2->collation, opts)) {
+                    return false;
+                }
+
+                /* Compare opclass if present */
+                if (elem1->opclass || elem2->opclass) {
+                    if (!elem1->opclass || !elem2->opclass) {
+                        return false;
+                    }
+                    if (!names_equal(elem1->opclass->opclass, elem2->opclass->opclass, opts)) {
+                        return false;
+                    }
+                    /* Note: We skip comparing opclass parameters as they're implementation details */
+                }
+
+                /* Compare sort order if specified */
+                if (elem1->has_sort_order || elem2->has_sort_order) {
+                    if (elem1->has_sort_order != elem2->has_sort_order) {
+                        return false;
+                    }
+                    if (elem1->sort_order != elem2->sort_order) {
+                        return false;
+                    }
+                }
+
+                /* Compare nulls order if specified */
+                if (elem1->has_nulls_order || elem2->has_nulls_order) {
+                    if (elem1->has_nulls_order != elem2->has_nulls_order) {
+                        return false;
+                    }
+                    if (elem1->nulls_order != elem2->nulls_order) {
+                        return false;
+                    }
+                }
+
+                /* Compare exclusion operator */
+                if (excl1->operators && excl2->operators) {
+                    if (!names_equal(excl1->operators[i], excl2->operators[i], opts)) {
+                        return false;
+                    }
+                } else if (excl1->operators || excl2->operators) {
+                    return false;
+                }
+            }
+
+            /* Compare WHERE predicate if present */
+            if (excl1->where_predicate || excl2->where_predicate) {
+                if (!excl1->where_predicate || !excl2->where_predicate) {
+                    return false;
+                }
+                if (!expressions_equal(excl1->where_predicate->expression,
+                                     excl2->where_predicate->expression, opts)) {
+                    return false;
+                }
+            }
+
+            /* Note: We don't compare index_params (storage options) as they're typically
+             * considered implementation details rather than logical constraint differences */
+            return true;
+        }
 
         case TABLE_CONSTRAINT_NOT_NULL:
             /* Compare column name */

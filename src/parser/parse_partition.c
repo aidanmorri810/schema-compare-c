@@ -12,7 +12,7 @@ PartitionByClause *parse_partition_by(Parser *parser) {
         return NULL;
     }
 
-    PartitionByClause *partition = mem_alloc(parser->memory_ctx, sizeof(PartitionByClause));
+    PartitionByClause *partition = calloc(1, sizeof(PartitionByClause));
     if (!partition) {
         parser_error(parser, "Out of memory");
         return NULL;
@@ -56,7 +56,7 @@ PartitionByClause *parse_partition_by(Parser *parser) {
 
 /* Parse partition bound specification */
 PartitionBoundSpec *parse_partition_bound_spec(Parser *parser) {
-    PartitionBoundSpec *spec = mem_alloc(parser->memory_ctx, sizeof(PartitionBoundSpec));
+    PartitionBoundSpec *spec = calloc(1, sizeof(PartitionBoundSpec));
     if (!spec) {
         parser_error(parser, "Out of memory");
         return NULL;

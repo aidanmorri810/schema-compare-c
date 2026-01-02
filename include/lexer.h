@@ -98,6 +98,13 @@ typedef enum {
     TOKEN_MINVALUE,
     TOKEN_MAXVALUE,
 
+    /* Keywords - Sequence related */
+    TOKEN_INCREMENT,
+    TOKEN_START,
+    TOKEN_CACHE,
+    TOKEN_CYCLE,
+    TOKEN_OWNED,
+
     /* Keywords - Index/Unique related */
     TOKEN_NULLS,
     TOKEN_DISTINCT,

@@ -267,13 +267,13 @@ TEST_CASE(compare_integration, end_to_end_workflow) {
 /* Test suite definition */
 static TestCase compare_integration_tests[] = {
     /* TODO: These depend on read_file_to_string which may not be working */
-    /* {"compare_identical_actor_tables", test_compare_integration_compare_identical_actor_tables, "compare_integration"}, */
-    /* {"compare_different_tables", test_compare_integration_compare_different_tables, "compare_integration"}, */
-    /* {"compare_modified_actor", test_compare_integration_compare_modified_actor, "compare_integration"}, */
-    /* {"compare_multiple_tables", test_compare_integration_compare_multiple_tables, "compare_integration"}, */
+    {"compare_identical_actor_tables", test_compare_integration_compare_identical_actor_tables, "compare_integration"},
+    {"compare_different_tables", test_compare_integration_compare_different_tables, "compare_integration"},
+    {"compare_modified_actor", test_compare_integration_compare_modified_actor, "compare_integration"},
+    {"compare_multiple_tables", test_compare_integration_compare_multiple_tables, "compare_integration"},
     {"type_normalization_real_world", test_compare_integration_type_normalization_real_world, "compare_integration"},
     {"case_insensitive_comparison", test_compare_integration_case_insensitive_comparison, "compare_integration"},
-    /* {"end_to_end_workflow", test_compare_integration_end_to_end_workflow, "compare_integration"}, */
+    {"end_to_end_workflow", test_compare_integration_end_to_end_workflow, "compare_integration"},
 };
 
 void run_compare_integration_tests(void) {

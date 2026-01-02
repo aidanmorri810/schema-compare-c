@@ -6,6 +6,8 @@
 
 /* Forward declarations */
 static bool parse_constraint_attributes(Parser *parser, ColumnConstraint *constraint);
+static SequenceOptions *parse_sequence_options(Parser *parser);
+static IndexParameters *parse_index_parameters(Parser *parser);
 
 /* Parse column constraint */
 ColumnConstraint *parse_column_constraint(Parser *parser) {
@@ -112,8 +114,19 @@ ColumnConstraint *parse_column_constraint(Parser *parser) {
             }
             constraint->type = CONSTRAINT_GENERATED_IDENTITY;
             constraint->constraint.generated_identity.type = IDENTITY_BY_DEFAULT;
-            constraint->constraint.generated_identity.sequence_opts = NULL;
-            /* TODO: Parse sequence options */
+
+            /* Parse optional sequence options */
+            if (parser_match(parser, TOKEN_LPAREN)) {
+                constraint->constraint.generated_identity.sequence_opts = parse_sequence_options(parser);
+                if (!constraint->constraint.generated_identity.sequence_opts) {
+                    return NULL;
+                }
+                if (!parser_expect(parser, TOKEN_RPAREN, "Expected ')' after sequence options")) {
+                    return NULL;
+                }
+            } else {
+                constraint->constraint.generated_identity.sequence_opts = NULL;
+            }
         } else {
             parser_error(parser, "Expected ALWAYS or BY DEFAULT after GENERATED");
             return NULL;
@@ -121,15 +134,33 @@ ColumnConstraint *parse_column_constraint(Parser *parser) {
     } else if (parser_match(parser, TOKEN_UNIQUE)) {
         constraint->type = CONSTRAINT_UNIQUE;
         constraint->constraint.unique.has_nulls_distinct = false;
-        constraint->constraint.unique.index_params = NULL;
-        /* TODO: Parse NULLS DISTINCT/NOT DISTINCT and index parameters */
+
+        /* Parse NULLS DISTINCT/NOT DISTINCT */
+        if (parser_match(parser, TOKEN_NULLS)) {
+            constraint->constraint.unique.has_nulls_distinct = true;
+            if (parser_match(parser, TOKEN_NOT)) {
+                if (!parser_expect(parser, TOKEN_DISTINCT, "Expected DISTINCT after NOT")) {
+                    return NULL;
+                }
+                constraint->constraint.unique.nulls_distinct = NULLS_NOT_DISTINCT;
+            } else if (parser_match(parser, TOKEN_DISTINCT)) {
+                constraint->constraint.unique.nulls_distinct = NULLS_DISTINCT;
+            } else {
+                parser_error(parser, "Expected DISTINCT or NOT DISTINCT after NULLS");
+                return NULL;
+            }
+        }
+
+        /* Parse index parameters */
+        constraint->constraint.unique.index_params = parse_index_parameters(parser);
     } else if (parser_match(parser, TOKEN_PRIMARY)) {
         if (!parser_expect(parser, TOKEN_KEY, "Expected KEY after PRIMARY")) {
             return NULL;
         }
         constraint->type = CONSTRAINT_PRIMARY_KEY;
-        constraint->constraint.primary_key.index_params = NULL;
-        /* TODO: Parse index parameters */
+
+        /* Parse index parameters */
+        constraint->constraint.primary_key.index_params = parse_index_parameters(parser);
     } else if (parser_match(parser, TOKEN_REFERENCES)) {
         constraint->type = CONSTRAINT_REFERENCES;
 
@@ -298,9 +329,63 @@ TableConstraint *parse_table_constraint(Parser *parser) {
         constraint->constraint.check.no_inherit = false;
     } else if (parser_match(parser, TOKEN_UNIQUE)) {
         constraint->type = TABLE_CONSTRAINT_UNIQUE;
-        /* TODO: Parse column list and index parameters */
-        parser_error(parser, "UNIQUE table constraints not fully implemented yet");
-        return NULL;
+
+        /* Parse column list */
+        if (!parser_expect(parser, TOKEN_LPAREN, "Expected '(' after UNIQUE")) {
+            return NULL;
+        }
+
+        int capacity = 4;
+        constraint->constraint.unique.columns = malloc(sizeof(char*) * capacity);
+        constraint->constraint.unique.column_count = 0;
+
+        do {
+            if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+                parser_error(parser, "Expected column name");
+                return NULL;
+            }
+
+            if (constraint->constraint.unique.column_count >= capacity) {
+                capacity *= 2;
+                char **new_cols = realloc(constraint->constraint.unique.columns,
+                                         sizeof(char*) * capacity);
+                if (!new_cols) {
+                    return NULL;
+                }
+                constraint->constraint.unique.columns = new_cols;
+            }
+
+            constraint->constraint.unique.columns[constraint->constraint.unique.column_count++] =
+                strdup(parser->current.lexeme);
+            parser_advance(parser);
+        } while (parser_match(parser, TOKEN_COMMA));
+
+        if (!parser_expect(parser, TOKEN_RPAREN, "Expected ')' after column list")) {
+            return NULL;
+        }
+
+        /* Initialize optional fields */
+        constraint->constraint.unique.without_overlaps_column = NULL;
+        constraint->constraint.unique.has_nulls_distinct = false;
+
+        /* Parse NULLS DISTINCT/NOT DISTINCT */
+        if (parser_match(parser, TOKEN_NULLS)) {
+            constraint->constraint.unique.has_nulls_distinct = true;
+            if (parser_match(parser, TOKEN_NOT)) {
+                if (!parser_expect(parser, TOKEN_DISTINCT, "Expected DISTINCT after NOT")) {
+                    return NULL;
+                }
+                constraint->constraint.unique.nulls_distinct = NULLS_NOT_DISTINCT;
+            } else if (parser_match(parser, TOKEN_DISTINCT)) {
+                constraint->constraint.unique.nulls_distinct = NULLS_DISTINCT;
+            } else {
+                parser_error(parser, "Expected DISTINCT or NOT DISTINCT after NULLS");
+                return NULL;
+            }
+        }
+
+        /* Parse index parameters */
+        constraint->constraint.unique.index_params = parse_index_parameters(parser);
     } else if (parser_match(parser, TOKEN_PRIMARY)) {
         if (!parser_expect(parser, TOKEN_KEY, "Expected KEY after PRIMARY")) {
             return NULL;
@@ -647,4 +732,215 @@ Expression *parse_expression(Parser *parser) {
     free(expr_str);
 
     return expr;
+}
+
+/* Parse sequence options for GENERATED IDENTITY constraints */
+static SequenceOptions *parse_sequence_options(Parser *parser) {
+    SequenceOptions *opts = mem_calloc(parser->memory_ctx, 1, sizeof(SequenceOptions));
+    if (!opts) {
+        parser_error(parser, "Out of memory");
+        return NULL;
+    }
+
+    /* Initialize all flags to false */
+    opts->has_increment = false;
+    opts->has_start = false;
+    opts->has_minvalue = false;
+    opts->is_no_minvalue = false;
+    opts->has_maxvalue = false;
+    opts->is_no_maxvalue = false;
+    opts->has_cache = false;
+    opts->has_cycle = false;
+
+    /* Parse sequence options in any order */
+    while (!parser_check(parser, TOKEN_RPAREN) && !parser_check(parser, TOKEN_EOF)) {
+        if (parser_match(parser, TOKEN_INCREMENT)) {
+            if (parser_match(parser, TOKEN_BY)) {
+                if (!parser_check(parser, TOKEN_NUMBER)) {
+                    parser_error(parser, "Expected number after INCREMENT BY");
+                    return NULL;
+                }
+                opts->has_increment = true;
+                opts->increment_by = atol(parser->current.lexeme);
+                parser_advance(parser);
+            } else {
+                parser_error(parser, "Expected BY after INCREMENT");
+                return NULL;
+            }
+        } else if (parser_match(parser, TOKEN_START)) {
+            if (parser_match(parser, TOKEN_WITH)) {
+                if (!parser_check(parser, TOKEN_NUMBER)) {
+                    parser_error(parser, "Expected number after START WITH");
+                    return NULL;
+                }
+                opts->has_start = true;
+                opts->start_with = atol(parser->current.lexeme);
+                parser_advance(parser);
+            } else {
+                parser_error(parser, "Expected WITH after START");
+                return NULL;
+            }
+        } else if (parser_match(parser, TOKEN_NO)) {
+            if (parser_match(parser, TOKEN_MINVALUE)) {
+                opts->has_minvalue = false;
+                opts->is_no_minvalue = true;
+            } else if (parser_match(parser, TOKEN_MAXVALUE)) {
+                opts->has_maxvalue = false;
+                opts->is_no_maxvalue = true;
+            } else if (parser_match(parser, TOKEN_CYCLE)) {
+                opts->has_cycle = true;
+                opts->cycle = false;
+            } else {
+                parser_error(parser, "Expected MINVALUE, MAXVALUE, or CYCLE after NO");
+                return NULL;
+            }
+        } else if (parser_match(parser, TOKEN_MINVALUE)) {
+            if (!parser_check(parser, TOKEN_NUMBER)) {
+                parser_error(parser, "Expected number after MINVALUE");
+                return NULL;
+            }
+            opts->has_minvalue = true;
+            opts->is_no_minvalue = false;
+            opts->minvalue = atol(parser->current.lexeme);
+            parser_advance(parser);
+        } else if (parser_match(parser, TOKEN_MAXVALUE)) {
+            if (!parser_check(parser, TOKEN_NUMBER)) {
+                parser_error(parser, "Expected number after MAXVALUE");
+                return NULL;
+            }
+            opts->has_maxvalue = true;
+            opts->is_no_maxvalue = false;
+            opts->maxvalue = atol(parser->current.lexeme);
+            parser_advance(parser);
+        } else if (parser_match(parser, TOKEN_CACHE)) {
+            if (!parser_check(parser, TOKEN_NUMBER)) {
+                parser_error(parser, "Expected number after CACHE");
+                return NULL;
+            }
+            opts->has_cache = true;
+            opts->cache = atol(parser->current.lexeme);
+            parser_advance(parser);
+        } else if (parser_match(parser, TOKEN_CYCLE)) {
+            opts->has_cycle = true;
+            opts->cycle = true;
+        } else {
+            /* Unknown option, stop parsing */
+            break;
+        }
+    }
+
+    return opts;
+}
+
+/* Parse WITH options for storage parameters */
+StorageParameterList *parse_with_options(Parser *parser) {
+    if (!parser_match(parser, TOKEN_WITH)) {
+        return NULL;
+    }
+
+    if (!parser_expect(parser, TOKEN_LPAREN, "Expected '(' after WITH")) {
+        return NULL;
+    }
+
+    StorageParameterList *list = mem_calloc(parser->memory_ctx, 1, sizeof(StorageParameterList));
+    if (!list) {
+        parser_error(parser, "Out of memory");
+        return NULL;
+    }
+
+    int capacity = 4;
+    list->parameters = mem_calloc(parser->memory_ctx, capacity, sizeof(StorageParameter));
+    if (!list->parameters) {
+        parser_error(parser, "Out of memory");
+        return NULL;
+    }
+    list->count = 0;
+
+    do {
+        if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+            parser_error(parser, "Expected storage parameter name");
+            return NULL;
+        }
+
+        if (list->count >= capacity) {
+            capacity *= 2;
+            StorageParameter *new_params = mem_calloc(parser->memory_ctx, capacity, sizeof(StorageParameter));
+            if (!new_params) {
+                parser_error(parser, "Out of memory");
+                return NULL;
+            }
+            memcpy(new_params, list->parameters, sizeof(StorageParameter) * list->count);
+            list->parameters = new_params;
+        }
+
+        list->parameters[list->count].name = mem_strdup(parser->memory_ctx, parser->current.lexeme);
+        parser_advance(parser);
+
+        if (!parser_expect(parser, TOKEN_EQUAL, "Expected '=' after parameter name")) {
+            return NULL;
+        }
+
+        /* Parameter value can be identifier, number, or string */
+        if (parser_check(parser, TOKEN_IDENTIFIER) ||
+            parser_check(parser, TOKEN_NUMBER) ||
+            parser_check(parser, TOKEN_STRING_LITERAL)) {
+            list->parameters[list->count].value = mem_strdup(parser->memory_ctx, parser->current.lexeme);
+            parser_advance(parser);
+        } else {
+            parser_error(parser, "Expected parameter value");
+            return NULL;
+        }
+
+        list->count++;
+    } while (parser_match(parser, TOKEN_COMMA));
+
+    if (!parser_expect(parser, TOKEN_RPAREN, "Expected ')' after WITH options")) {
+        return NULL;
+    }
+
+    return list;
+}
+
+/* Parse index parameters (USING, WITH, TABLESPACE) */
+static IndexParameters *parse_index_parameters(Parser *parser) {
+    IndexParameters *params = NULL;
+    StorageParameterList *with_opts = NULL;
+    char *tablespace = NULL;
+
+    /* Parse USING index_method (parse but don't store - btree is default) */
+    if (parser_match(parser, TOKEN_USING)) {
+        if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+            parser_error(parser, "Expected index method after USING");
+            return NULL;
+        }
+        /* Skip the index method - it's typically btree for UNIQUE/PK and isn't stored in IndexParameters */
+        parser_advance(parser);
+    }
+
+    /* Parse WITH (...) */
+    with_opts = parse_with_options(parser);
+
+    /* Parse TABLESPACE tablespace_name */
+    if (parser_match(parser, TOKEN_TABLESPACE)) {
+        if (!parser_check(parser, TOKEN_IDENTIFIER)) {
+            parser_error(parser, "Expected tablespace name after TABLESPACE");
+            return NULL;
+        }
+        tablespace = mem_strdup(parser->memory_ctx, parser->current.lexeme);
+        parser_advance(parser);
+    }
+
+    /* Only allocate if we found at least one parameter we're storing */
+    if (with_opts || tablespace) {
+        params = mem_calloc(parser->memory_ctx, 1, sizeof(IndexParameters));
+        if (!params) {
+            parser_error(parser, "Out of memory");
+            return NULL;
+        }
+        params->include = NULL;  /* INCLUDE is not supported in column constraints */
+        params->with_options = with_opts;
+        params->tablespace_name = tablespace;
+    }
+
+    return params;
 }
