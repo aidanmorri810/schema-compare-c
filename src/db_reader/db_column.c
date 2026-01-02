@@ -160,7 +160,6 @@ bool db_populate_columns(DBConnection *conn, const char *schema,
             const char *generated = PQgetvalue(res, i, 5);
             if (generated[0] == 's') {
                 /* Generated stored column */
-                /* TODO: Get generation expression */
                 log_warn("GENERATED column detected but expression extraction not implemented");
             }
         }

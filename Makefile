@@ -152,7 +152,7 @@ db-shell:
 test-db: db-up $(TEST_TARGET)
 	@echo "Running database integration tests..."
 	@RUN_DB_TESTS=1 PGHOST=localhost PGPORT=5433 PGDATABASE=schema_compare_test \
-	PGUSER=testuser PGPASSWORD=testpass $(TEST_TARGET) --suite db_reader
+	PGUSER=testuser PGPASSWORD=testpass $(TEST_TARGET)
 
 test-all: test-db
 
