@@ -1,0 +1,6 @@
+gcc -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L -MMD -MP -MF build/deps/memory.d -c src/memory/memory.c -o build/obj/memory/memory.o
+gcc -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L -MMD -MP -MF build/deps/error.d -c src/utils/error.c -o build/obj/utils/error.o
+gcc -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L -MMD -MP -MF build/deps/file_io.d -c src/utils/file_io.c -o build/obj/utils/file_io.o
+gcc -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L -MMD -MP -MF build/deps/hash_table.d -c src/utils/hash_table.c -o build/obj/utils/hash_table.o
+gcc -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L -MMD -MP -MF build/deps/string_utils.d -c src/utils/string_utils.c -o build/obj/utils/string_utils.o
+Built library objects
