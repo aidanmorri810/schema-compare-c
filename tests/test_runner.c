@@ -53,6 +53,10 @@ void run_nora_central_auth_verification_tests(void);
 void run_nora_central_tenant_tests(void);
 void run_nora_central_user_tests(void);
 void run_nora_central_tenant_user_tests(void);
+/* New comprehensive compare test suites */
+void run_compare_columns_tests(void);
+void run_compare_constraints_tests(void);
+void run_compare_schema_tests(void);
 /* Add more test suite declarations here */
 
 /* Global filter variables (defined in test_framework.c) */
@@ -122,6 +126,9 @@ static void list_test_suites(void) {
     printf("  - nora_central_tenant\n");
     printf("  - nora_central_user\n");
     printf("  - nora_central_tenant_user\n");
+    printf("  - compare_columns\n");
+    printf("  - compare_constraints\n");
+    printf("  - compare_schema\n");
 }
 
 int main(int argc, char **argv) {
@@ -239,6 +246,10 @@ int main(int argc, char **argv) {
     run_nora_central_tenant_tests();
     run_nora_central_user_tests();
     run_nora_central_tenant_user_tests();
+    /* New comprehensive compare tests */
+    run_compare_columns_tests();
+    run_compare_constraints_tests();
+    run_compare_schema_tests();
     /* Add more test suite calls here */
 
     /* Print summary */

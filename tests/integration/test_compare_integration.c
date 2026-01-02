@@ -15,14 +15,14 @@ static CreateTableStmt *parse_table_from_file(const char *filename) {
     }
 
     Parser *parser = parser_create(sql);
-    free(sql);
-
     if (!parser) {
+        free(sql);
         return NULL;
     }
 
     CreateTableStmt *stmt = parser_parse_create_table(parser);
     parser_destroy(parser);
+    free(sql);  /* Free SQL after parser is destroyed */
 
     return stmt;
 }

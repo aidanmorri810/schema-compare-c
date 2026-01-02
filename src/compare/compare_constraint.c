@@ -417,6 +417,98 @@ bool constraints_equivalent(const TableConstraint *c1, const TableConstraint *c2
     }
 }
 
+/* Helper to get ColumnDef from TableElement */
+static const ColumnDef *get_column_def(const TableElement *elem) {
+    if (elem && elem->type == TABLE_ELEM_COLUMN) {
+        return &elem->elem.column;
+    }
+    return NULL;
+}
+
+/* Structure to track constraint info (table-level or column-level) */
+typedef struct {
+    const TableConstraint *table_constraint;  /* NULL for column constraints */
+    const ColumnConstraint *column_constraint;  /* NULL for table constraints */
+    const char *column_name;  /* Set for column constraints */
+    int constraint_type;  /* Unified type */
+} ConstraintInfo;
+
+/* Helper to compare two ConstraintInfo structures for equivalence */
+static bool constraint_infos_equivalent(const ConstraintInfo *c1, const ConstraintInfo *c2,
+                                       const CompareOptions *opts) {
+    if (!c1 || !c2) {
+        return false;
+    }
+
+    /* Must be same type */
+    if (c1->constraint_type != c2->constraint_type) {
+        return false;
+    }
+
+    /* If both are table-level constraints, use existing comparison */
+    if (c1->table_constraint && c2->table_constraint) {
+        return constraints_equivalent(c1->table_constraint, c2->table_constraint, opts);
+    }
+
+    /* If both are column-level constraints */
+    if (c1->column_constraint && c2->column_constraint) {
+        /* Must be on the same column */
+        if (!names_equal(c1->column_name, c2->column_name, opts)) {
+            return false;
+        }
+
+        /* For inline PK and UNIQUE, type match and same column is sufficient */
+        if (c1->constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY ||
+            c1->constraint_type == TABLE_CONSTRAINT_UNIQUE) {
+            return true;
+        }
+    }
+
+    /* Mixed constraint types (one table-level, one column-level) - check if semantically equivalent */
+    if ((c1->table_constraint && c2->column_constraint) ||
+        (c1->column_constraint && c2->table_constraint)) {
+
+        /* For PRIMARY KEY and UNIQUE, check if they apply to the same column */
+        if (c1->constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY) {
+            const TablePrimaryKeyConstraint *pk = NULL;
+            const char *col_name = NULL;
+
+            if (c1->table_constraint) {
+                pk = &c1->table_constraint->constraint.primary_key;
+                col_name = c2->column_name;
+            } else {
+                pk = &c2->table_constraint->constraint.primary_key;
+                col_name = c1->column_name;
+            }
+
+            /* Check if PK is single-column and matches the inline constraint column */
+            if (pk->column_count == 1 && names_equal(pk->columns[0], col_name, opts)) {
+                return true;
+            }
+        }
+
+        if (c1->constraint_type == TABLE_CONSTRAINT_UNIQUE) {
+            const TableUniqueConstraint *uniq = NULL;
+            const char *col_name = NULL;
+
+            if (c1->table_constraint) {
+                uniq = &c1->table_constraint->constraint.unique;
+                col_name = c2->column_name;
+            } else {
+                uniq = &c2->table_constraint->constraint.unique;
+                col_name = c1->column_name;
+            }
+
+            /* Check if UNIQUE is single-column and matches the inline constraint column */
+            if (uniq->column_count == 1 && names_equal(uniq->columns[0], col_name, opts)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /* Compare constraints between two tables */
 void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *target,
                         TableDiff *result, const CompareOptions *opts, MemoryContext *mem_ctx) {
@@ -430,7 +522,7 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
     int source_count = 0;
     int target_count = 0;
 
-    /* Count constraints */
+    /* Count table-level constraints */
     for (TableElement *elem = source->table_def.regular.elements; elem; elem = elem->next) {
         if (get_table_constraint(elem)) {
             source_count++;
@@ -443,39 +535,110 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
         }
     }
 
+    /* Also count inline PRIMARY KEY and UNIQUE constraints on columns */
+    for (TableElement *elem = source->table_def.regular.elements; elem; elem = elem->next) {
+        const ColumnDef *col = get_column_def(elem);
+        if (col && col->constraints) {
+            for (ColumnConstraint *cc = col->constraints; cc; cc = cc->next) {
+                if (cc->type == CONSTRAINT_PRIMARY_KEY || cc->type == CONSTRAINT_UNIQUE) {
+                    source_count++;
+                }
+            }
+        }
+    }
+
+    for (TableElement *elem = target->table_def.regular.elements; elem; elem = elem->next) {
+        const ColumnDef *col = get_column_def(elem);
+        if (col && col->constraints) {
+            for (ColumnConstraint *cc = col->constraints; cc; cc = cc->next) {
+                if (cc->type == CONSTRAINT_PRIMARY_KEY || cc->type == CONSTRAINT_UNIQUE) {
+                    target_count++;
+                }
+            }
+        }
+    }
+
     if (source_count == 0 && target_count == 0) {
         return;
     }
 
     /* Build arrays of constraints */
-    const TableConstraint **source_constraints = NULL;
-    const TableConstraint **target_constraints = NULL;
+    ConstraintInfo *source_constraints = NULL;
+    ConstraintInfo *target_constraints = NULL;
 
     if (source_count > 0) {
-        source_constraints = malloc(sizeof(TableConstraint *) * source_count);
+        source_constraints = calloc(source_count, sizeof(ConstraintInfo));
         if (!source_constraints) {
             return;
         }
         int idx = 0;
+
+        /* Add table-level constraints */
         for (TableElement *elem = source->table_def.regular.elements; elem; elem = elem->next) {
             const TableConstraint *tc = get_table_constraint(elem);
             if (tc) {
-                source_constraints[idx++] = tc;
+                source_constraints[idx].table_constraint = tc;
+                source_constraints[idx].constraint_type = tc->type;
+                idx++;
+            }
+        }
+
+        /* Add inline column constraints (PK and UNIQUE only) */
+        for (TableElement *elem = source->table_def.regular.elements; elem; elem = elem->next) {
+            const ColumnDef *col = get_column_def(elem);
+            if (col && col->constraints) {
+                for (ColumnConstraint *cc = col->constraints; cc; cc = cc->next) {
+                    if (cc->type == CONSTRAINT_PRIMARY_KEY) {
+                        source_constraints[idx].column_constraint = cc;
+                        source_constraints[idx].column_name = col->column_name;
+                        source_constraints[idx].constraint_type = TABLE_CONSTRAINT_PRIMARY_KEY;
+                        idx++;
+                    } else if (cc->type == CONSTRAINT_UNIQUE) {
+                        source_constraints[idx].column_constraint = cc;
+                        source_constraints[idx].column_name = col->column_name;
+                        source_constraints[idx].constraint_type = TABLE_CONSTRAINT_UNIQUE;
+                        idx++;
+                    }
+                }
             }
         }
     }
 
     if (target_count > 0) {
-        target_constraints = malloc(sizeof(TableConstraint *) * target_count);
+        target_constraints = calloc(target_count, sizeof(ConstraintInfo));
         if (!target_constraints) {
             free(source_constraints);
             return;
         }
         int idx = 0;
+
+        /* Add table-level constraints */
         for (TableElement *elem = target->table_def.regular.elements; elem; elem = elem->next) {
             const TableConstraint *tc = get_table_constraint(elem);
             if (tc) {
-                target_constraints[idx++] = tc;
+                target_constraints[idx].table_constraint = tc;
+                target_constraints[idx].constraint_type = tc->type;
+                idx++;
+            }
+        }
+
+        /* Add inline column constraints (PK and UNIQUE only) */
+        for (TableElement *elem = target->table_def.regular.elements; elem; elem = elem->next) {
+            const ColumnDef *col = get_column_def(elem);
+            if (col && col->constraints) {
+                for (ColumnConstraint *cc = col->constraints; cc; cc = cc->next) {
+                    if (cc->type == CONSTRAINT_PRIMARY_KEY) {
+                        target_constraints[idx].column_constraint = cc;
+                        target_constraints[idx].column_name = col->column_name;
+                        target_constraints[idx].constraint_type = TABLE_CONSTRAINT_PRIMARY_KEY;
+                        idx++;
+                    } else if (cc->type == CONSTRAINT_UNIQUE) {
+                        target_constraints[idx].column_constraint = cc;
+                        target_constraints[idx].column_name = col->column_name;
+                        target_constraints[idx].constraint_type = TABLE_CONSTRAINT_UNIQUE;
+                        idx++;
+                    }
+                }
             }
         }
     }
@@ -497,7 +660,7 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
 
     /* Find matching constraints and modifications */
     for (int i = 0; i < target_count; i++) {
-        const TableConstraint *target_c = target_constraints[i];
+        const ConstraintInfo *target_c = &target_constraints[i];
         bool found_match = false;
 
         for (int j = 0; j < source_count; j++) {
@@ -505,9 +668,9 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
                 continue;
             }
 
-            const TableConstraint *source_c = source_constraints[j];
+            const ConstraintInfo *source_c = &source_constraints[j];
 
-            if (constraints_equivalent(source_c, target_c, opts)) {
+            if (constraint_infos_equivalent(source_c, target_c, opts)) {
                 source_matched[j] = true;
                 target_matched[i] = true;
                 found_match = true;
@@ -517,10 +680,18 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
 
         if (!found_match) {
             /* Constraint added */
-            ConstraintDiff *cd = constraint_diff_create(target_c->constraint_name);
+            const char *constraint_name = NULL;
+            if (target_c->table_constraint && target_c->table_constraint->constraint_name) {
+                constraint_name = target_c->table_constraint->constraint_name;
+            } else if (target_c->column_name) {
+                /* For inline constraints, use column name as identifier */
+                constraint_name = target_c->column_name;
+            }
+
+            ConstraintDiff *cd = constraint_diff_create(constraint_name);
             if (cd) {
                 cd->added = true;
-                cd->new_type = target_c->type;
+                cd->new_type = target_c->constraint_type;
                 result->constraint_add_count++;
 
                 if (last_added) {
@@ -531,15 +702,16 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
                 last_added = cd;
 
                 /* Create diff entry */
+                const char *type_str = (target_c->constraint_type == TABLE_CONSTRAINT_CHECK) ? "CHECK" :
+                                      (target_c->constraint_type == TABLE_CONSTRAINT_UNIQUE) ? "UNIQUE" :
+                                      (target_c->constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY) ? "PRIMARY KEY" :
+                                      (target_c->constraint_type == TABLE_CONSTRAINT_FOREIGN_KEY) ? "FOREIGN KEY" :
+                                      (target_c->constraint_type == TABLE_CONSTRAINT_EXCLUDE) ? "EXCLUDE" : "CONSTRAINT";
+
                 Diff *diff = diff_create(DIFF_CONSTRAINT_ADDED, SEVERITY_INFO,
                                         result->table_name,
-                                        target_c->constraint_name ? target_c->constraint_name : "(unnamed)");
+                                        constraint_name ? constraint_name : "(unnamed)");
                 if (diff) {
-                    const char *type_str = (target_c->type == TABLE_CONSTRAINT_CHECK) ? "CHECK" :
-                                          (target_c->type == TABLE_CONSTRAINT_UNIQUE) ? "UNIQUE" :
-                                          (target_c->type == TABLE_CONSTRAINT_PRIMARY_KEY) ? "PRIMARY KEY" :
-                                          (target_c->type == TABLE_CONSTRAINT_FOREIGN_KEY) ? "FOREIGN KEY" :
-                                          (target_c->type == TABLE_CONSTRAINT_EXCLUDE) ? "EXCLUDE" : "CONSTRAINT";
                     diff_set_values(diff, NULL, type_str);
                     diff_append(&result->diffs, diff);
                     result->diff_count++;
@@ -552,12 +724,20 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
     /* Find removed constraints */
     for (int i = 0; i < source_count; i++) {
         if (!source_matched[i]) {
-            const TableConstraint *source_c = source_constraints[i];
+            const ConstraintInfo *source_c = &source_constraints[i];
 
-            ConstraintDiff *cd = constraint_diff_create(source_c->constraint_name);
+            const char *constraint_name = NULL;
+            if (source_c->table_constraint && source_c->table_constraint->constraint_name) {
+                constraint_name = source_c->table_constraint->constraint_name;
+            } else if (source_c->column_name) {
+                /* For inline constraints, use column name as identifier */
+                constraint_name = source_c->column_name;
+            }
+
+            ConstraintDiff *cd = constraint_diff_create(constraint_name);
             if (cd) {
                 cd->removed = true;
-                cd->old_type = source_c->type;
+                cd->old_type = source_c->constraint_type;
                 result->constraint_remove_count++;
 
                 if (last_removed) {
@@ -568,15 +748,16 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
                 last_removed = cd;
 
                 /* Create diff entry */
+                const char *type_str = (source_c->constraint_type == TABLE_CONSTRAINT_CHECK) ? "CHECK" :
+                                      (source_c->constraint_type == TABLE_CONSTRAINT_UNIQUE) ? "UNIQUE" :
+                                      (source_c->constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY) ? "PRIMARY KEY" :
+                                      (source_c->constraint_type == TABLE_CONSTRAINT_FOREIGN_KEY) ? "FOREIGN KEY" :
+                                      (source_c->constraint_type == TABLE_CONSTRAINT_EXCLUDE) ? "EXCLUDE" : "CONSTRAINT";
+
                 Diff *diff = diff_create(DIFF_CONSTRAINT_REMOVED, SEVERITY_WARNING,
                                         result->table_name,
-                                        source_c->constraint_name ? source_c->constraint_name : "(unnamed)");
+                                        constraint_name ? constraint_name : "(unnamed)");
                 if (diff) {
-                    const char *type_str = (source_c->type == TABLE_CONSTRAINT_CHECK) ? "CHECK" :
-                                          (source_c->type == TABLE_CONSTRAINT_UNIQUE) ? "UNIQUE" :
-                                          (source_c->type == TABLE_CONSTRAINT_PRIMARY_KEY) ? "PRIMARY KEY" :
-                                          (source_c->type == TABLE_CONSTRAINT_FOREIGN_KEY) ? "FOREIGN KEY" :
-                                          (source_c->type == TABLE_CONSTRAINT_EXCLUDE) ? "EXCLUDE" : "CONSTRAINT";
                     diff_set_values(diff, type_str, NULL);
                     diff_append(&result->diffs, diff);
                     result->diff_count++;
