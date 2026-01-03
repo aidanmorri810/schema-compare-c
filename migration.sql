@@ -3,3 +3,7 @@
 --
 -- Tables added: 0, removed: 0, modified: 0
 
+-- Create new tables (foreign keys will be added after)
+
+-- Add foreign key constraints for new tables
+

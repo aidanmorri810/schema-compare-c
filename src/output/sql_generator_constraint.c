@@ -23,93 +23,6 @@ static char *format_constraint_name(const char *name) {
     return result;
 }
 
-/* Helper: Generate column constraint SQL (used by sql_generator_table.c) */
-char *generate_column_constraint(const ColumnConstraint *cc) {
-    if (!cc) {
-        return NULL;
-    }
-
-    StringBuilder *sb = sb_create();
-    if (!sb) {
-        return NULL;
-    }
-
-    char *constraint_name = format_constraint_name(cc->constraint_name);
-    if (constraint_name) {
-        sb_append(sb, constraint_name);
-        free(constraint_name);
-    }
-
-    switch (cc->type) {
-        case CONSTRAINT_NOT_NULL:
-            sb_append(sb, "NOT NULL");
-            break;
-        case CONSTRAINT_NULL:
-            sb_append(sb, "NULL");
-            break;
-        case CONSTRAINT_DEFAULT:
-            sb_append(sb, "DEFAULT ");
-            if (cc->constraint.default_val.expr && cc->constraint.default_val.expr->expression) {
-                sb_append(sb, cc->constraint.default_val.expr->expression);
-            }
-            break;
-        case CONSTRAINT_CHECK:
-            sb_append(sb, "CHECK (");
-            if (cc->constraint.check.expr && cc->constraint.check.expr->expression) {
-                sb_append(sb, cc->constraint.check.expr->expression);
-            }
-            sb_append(sb, ")");
-            break;
-        case CONSTRAINT_UNIQUE:
-            sb_append(sb, "UNIQUE");
-            break;
-        case CONSTRAINT_PRIMARY_KEY:
-            sb_append(sb, "PRIMARY KEY");
-            break;
-        case CONSTRAINT_REFERENCES:
-            sb_append(sb, "REFERENCES ");
-            if (cc->constraint.references.reftable) {
-                char *quoted_table = quote_identifier(cc->constraint.references.reftable);
-                sb_append(sb, quoted_table);
-                free(quoted_table);
-            }
-            if (cc->constraint.references.refcolumn) {
-                sb_append(sb, " (");
-                char *quoted_col = quote_identifier(cc->constraint.references.refcolumn);
-                sb_append(sb, quoted_col);
-                free(quoted_col);
-                sb_append(sb, ")");
-            }
-            if (cc->constraint.references.has_on_delete) {
-                sb_append(sb, " ON DELETE ");
-                switch (cc->constraint.references.on_delete) {
-                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
-                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
-                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
-                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
-                    default: sb_append(sb, "NO ACTION"); break;
-                }
-            }
-            if (cc->constraint.references.has_on_update) {
-                sb_append(sb, " ON UPDATE ");
-                switch (cc->constraint.references.on_update) {
-                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
-                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
-                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
-                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
-                    default: sb_append(sb, "NO ACTION"); break;
-                }
-            }
-            break;
-        default:
-            break;
-    }
-
-    char *result = sb_to_string(sb);
-    sb_free(sb);
-    return result;
-}
-
 /* Helper: Generate just the REFERENCES clause from a column constraint (without CONSTRAINT name) */
 char *generate_references_clause(const ColumnConstraint *cc) {
     if (!cc || cc->type != CONSTRAINT_REFERENCES) {
@@ -160,8 +73,71 @@ char *generate_references_clause(const ColumnConstraint *cc) {
     return result;
 }
 
-/* Helper: Generate table constraint SQL (used by sql_generator_table.c) */
-char *generate_table_constraint(const TableConstraint *tc) {
+/* Helper: Generate column constraint SQL (used by sql_generator_table.c) */
+char *generate_column_constraint(const ColumnConstraint *cc) {
+    if (!cc) {
+        return NULL;
+    }
+
+    StringBuilder *sb = sb_create();
+    if (!sb) {
+        return NULL;
+    }
+
+    char *constraint_name = format_constraint_name(cc->constraint_name);
+    if (constraint_name) {
+        sb_append(sb, constraint_name);
+        free(constraint_name);
+    }
+
+    switch (cc->type) {
+        case CONSTRAINT_NOT_NULL:
+            sb_append(sb, "NOT NULL");
+            break;
+        case CONSTRAINT_NULL:
+            sb_append(sb, "NULL");
+            break;
+        case CONSTRAINT_DEFAULT:
+            sb_append(sb, "DEFAULT ");
+            if (cc->constraint.default_val.expr && cc->constraint.default_val.expr->expression) {
+                sb_append(sb, cc->constraint.default_val.expr->expression);
+            }
+            break;
+        case CONSTRAINT_CHECK:
+            sb_append(sb, "CHECK (");
+            if (cc->constraint.check.expr && cc->constraint.check.expr->expression) {
+                sb_append(sb, cc->constraint.check.expr->expression);
+            }
+            sb_append(sb, ")");
+            break;
+        case CONSTRAINT_UNIQUE:
+            sb_append(sb, "UNIQUE");
+            break;
+        case CONSTRAINT_PRIMARY_KEY:
+            sb_append(sb, "PRIMARY KEY");
+            break;
+        case CONSTRAINT_REFERENCES: {
+            char *ref_clause = generate_references_clause(cc);
+            if (ref_clause) {
+                sb_append(sb, ref_clause);
+                free(ref_clause);
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    char *result = sb_to_string(sb);
+    sb_free(sb);
+    return result;
+}
+
+/* Helper: Generate table constraint SQL (used by sql_generator_table.c
+ * If include_constraint_name is true, includes "CONSTRAINT <name>" prefix
+ * If include_constraint_name is false, generates only the constraint definition
+ */
+static char *generate_table_constraint_internal(const TableConstraint *tc, bool include_constraint_name) {
     if (!tc) {
         return NULL;
     }
@@ -171,10 +147,12 @@ char *generate_table_constraint(const TableConstraint *tc) {
         return NULL;
     }
 
-    char *constraint_name = format_constraint_name(tc->constraint_name);
-    if (constraint_name) {
-        sb_append(sb, constraint_name);
-        free(constraint_name);
+    if (include_constraint_name) {
+        char *constraint_name = format_constraint_name(tc->constraint_name);
+        if (constraint_name) {
+            sb_append(sb, constraint_name);
+            free(constraint_name);
+        }
     }
 
     switch (tc->type) {
@@ -259,97 +237,9 @@ char *generate_table_constraint(const TableConstraint *tc) {
     return result;
 }
 
-/* Helper: Generate constraint definition without CONSTRAINT keyword (used internally) */
-static char *generate_table_constraint_definition_only(const TableConstraint *tc) {
-    if (!tc) {
-        return NULL;
-    }
-
-    StringBuilder *sb = sb_create();
-    if (!sb) {
-        return NULL;
-    }
-
-    switch (tc->type) {
-        case TABLE_CONSTRAINT_PRIMARY_KEY:
-            sb_append(sb, "PRIMARY KEY (");
-            for (int i = 0; i < tc->constraint.primary_key.column_count; i++) {
-                if (i > 0) sb_append(sb, ", ");
-                char *quoted = quote_identifier(tc->constraint.primary_key.columns[i]);
-                sb_append(sb, quoted);
-                free(quoted);
-            }
-            sb_append(sb, ")");
-            break;
-        case TABLE_CONSTRAINT_UNIQUE:
-            sb_append(sb, "UNIQUE (");
-            for (int i = 0; i < tc->constraint.unique.column_count; i++) {
-                if (i > 0) sb_append(sb, ", ");
-                char *quoted = quote_identifier(tc->constraint.unique.columns[i]);
-                sb_append(sb, quoted);
-                free(quoted);
-            }
-            sb_append(sb, ")");
-            break;
-        case TABLE_CONSTRAINT_FOREIGN_KEY:
-            sb_append(sb, "FOREIGN KEY (");
-            for (int i = 0; i < tc->constraint.foreign_key.column_count; i++) {
-                if (i > 0) sb_append(sb, ", ");
-                char *quoted = quote_identifier(tc->constraint.foreign_key.columns[i]);
-                sb_append(sb, quoted);
-                free(quoted);
-            }
-            sb_append(sb, ") REFERENCES ");
-            if (tc->constraint.foreign_key.reftable) {
-                char *quoted_table = quote_identifier(tc->constraint.foreign_key.reftable);
-                sb_append(sb, quoted_table);
-                free(quoted_table);
-            }
-            if (tc->constraint.foreign_key.refcolumn_count > 0) {
-                sb_append(sb, " (");
-                for (int i = 0; i < tc->constraint.foreign_key.refcolumn_count; i++) {
-                    if (i > 0) sb_append(sb, ", ");
-                    char *quoted = quote_identifier(tc->constraint.foreign_key.refcolumns[i]);
-                    sb_append(sb, quoted);
-                    free(quoted);
-                }
-                sb_append(sb, ")");
-            }
-            if (tc->constraint.foreign_key.has_on_delete) {
-                sb_append(sb, " ON DELETE ");
-                switch (tc->constraint.foreign_key.on_delete) {
-                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
-                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
-                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
-                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
-                    default: sb_append(sb, "NO ACTION"); break;
-                }
-            }
-            if (tc->constraint.foreign_key.has_on_update) {
-                sb_append(sb, " ON UPDATE ");
-                switch (tc->constraint.foreign_key.on_update) {
-                    case REF_ACTION_CASCADE: sb_append(sb, "CASCADE"); break;
-                    case REF_ACTION_RESTRICT: sb_append(sb, "RESTRICT"); break;
-                    case REF_ACTION_SET_NULL: sb_append(sb, "SET NULL"); break;
-                    case REF_ACTION_SET_DEFAULT: sb_append(sb, "SET DEFAULT"); break;
-                    default: sb_append(sb, "NO ACTION"); break;
-                }
-            }
-            break;
-        case TABLE_CONSTRAINT_CHECK:
-            sb_append(sb, "CHECK (");
-            if (tc->constraint.check.expr && tc->constraint.check.expr->expression) {
-                sb_append(sb, tc->constraint.check.expr->expression);
-            }
-            sb_append(sb, ")");
-            break;
-        default:
-            break;
-    }
-
-    char *result = sb_to_string(sb);
-    sb_free(sb);
-    return result;
+/* Public wrapper: Generate table constraint SQL with CONSTRAINT name (used by sql_generator_table.c) */
+char *generate_table_constraint(const TableConstraint *tc) {
+    return generate_table_constraint_internal(tc, true);
 }
 
 /* Helper: Generate constraint definition from ConstraintDiff */
@@ -363,7 +253,7 @@ static char *generate_constraint_definition(const ConstraintDiff *cd) {
         if (!cd->is_column_constraint) {
             /* Table-level constraint - generate definition without CONSTRAINT keyword */
             const TableConstraint *tc = (const TableConstraint *)cd->target_constraint;
-            return generate_table_constraint_definition_only(tc);
+            return generate_table_constraint_internal(tc, false);
         } else {
             /* Column-level constraint - generate as table-level */
             const ColumnConstraint *cc = (const ColumnConstraint *)cd->target_constraint;
