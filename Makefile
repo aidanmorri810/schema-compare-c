@@ -6,7 +6,14 @@ CFLAGS = -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L
 LDFLAGS = -lpq
 DEBUG_FLAGS = -g -O0 -DDEBUG
 RELEASE_FLAGS = -Oz -DNDEBUG -s -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
-RELEASE_LDFLAGS = -lpq -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
+
+# Platform-specific linker flags
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    RELEASE_LDFLAGS = -lpq -flto -Wl,-dead_strip
+else
+    RELEASE_LDFLAGS = -lpq -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
+endif
 
 # Directories
 SRC_DIR = src
