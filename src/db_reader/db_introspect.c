@@ -32,20 +32,23 @@ CreateTableStmt *db_read_table(DBConnection *conn, const char *schema,
     stmt->table_type = TABLE_TYPE_NORMAL;
     stmt->if_not_exists = false;
 
-    /* Populate table info */
-    if (!db_populate_table_info(conn, schema, table_name, stmt, mem_ctx)) {
+    /* Create array for batch functions (single table) */
+    CreateTableStmt *stmts[1] = { stmt };
+
+    /* Populate table info using batch function */
+    if (!db_populate_table_info(conn, schema, stmts, 1, mem_ctx)) {
         log_error("Failed to populate table info for %s.%s", schema, table_name);
         return NULL;
     }
 
-    /* Populate columns */
-    if (!db_populate_columns(conn, schema, table_name, stmt, mem_ctx)) {
+    /* Populate columns using batch function */
+    if (!db_populate_columns(conn, schema, stmts, 1, mem_ctx)) {
         log_error("Failed to populate columns for %s.%s", schema, table_name);
         return NULL;
     }
 
-    /* Populate constraints */
-    if (!db_populate_constraints(conn, schema, table_name, stmt, mem_ctx)) {
+    /* Populate constraints using batch function */
+    if (!db_populate_constraints(conn, schema, stmts, 1, mem_ctx)) {
         log_error("Failed to populate constraints for %s.%s", schema, table_name);
         return NULL;
     }
@@ -95,17 +98,63 @@ CreateTableStmt **db_read_schema(DBConnection *conn, const char *schema_name,
         return NULL;
     }
 
-    /* Read each table */
+    /* Create statements for all tables */
     int count = 0;
     for (int i = 0; i < nrows; i++) {
         const char *table_name = PQgetvalue(res, i, 0);
-        CreateTableStmt *stmt = db_read_table(conn, schema_name, table_name, mem_ctx);
-        if (stmt) {
-            tables[count++] = stmt;
+
+        log_info("Reading table: %s.%s", schema_name, table_name);
+
+        /* Create statement */
+        CreateTableStmt *stmt = create_table_stmt_alloc(mem_ctx);
+        if (!stmt) {
+            log_error("Failed to allocate CreateTableStmt");
+            continue;
         }
+
+        /* Initialize */
+        stmt->variant = CREATE_TABLE_REGULAR;
+        stmt->table_name = mem_strdup(mem_ctx, table_name);
+        stmt->temp_scope = TEMP_SCOPE_NONE;
+        stmt->table_type = TABLE_TYPE_NORMAL;
+        stmt->if_not_exists = false;
+
+        tables[count++] = stmt;
     }
 
     PQclear(res);
+
+    if (count == 0) {
+        *table_count = 0;
+        return NULL;
+    }
+
+    /* Batch populate table info for all tables in one query */
+    if (!db_populate_table_info(conn, schema_name, tables, count, mem_ctx)) {
+        log_error("Failed to batch populate table info for schema %s", schema_name);
+        *table_count = 0;
+        return NULL;
+    }
+
+    /* Batch populate columns for all tables in one query */
+    if (!db_populate_columns(conn, schema_name, tables, count, mem_ctx)) {
+        log_error("Failed to batch populate columns for schema %s", schema_name);
+        *table_count = 0;
+        return NULL;
+    }
+
+    /* Batch populate constraints for all tables in one query */
+    if (!db_populate_constraints(conn, schema_name, tables, count, mem_ctx)) {
+        log_error("Failed to batch populate constraints for schema %s", schema_name);
+        *table_count = 0;
+        return NULL;
+    }
+
+    /* Log success for all tables */
+    for (int i = 0; i < count; i++) {
+        log_info("Successfully read table: %s.%s", schema_name, tables[i]->table_name);
+    }
+
     *table_count = count;
     return tables;
 }

@@ -7,8 +7,7 @@ services:
       POSTGRES_PASSWORD: testpass
       POSTGRES_DB: schema_compare_test
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
-    ports:
-      - "5433:5432"  # Use 5433 to avoid conflicts with local PostgreSQL
+    # No external port exposure - only accessible via toxiproxy
     volumes:
       - postgres-test-data:/var/lib/postgresql/data
       - ./tests/db_setup:/docker-entrypoint-initdb.d:ro
@@ -19,6 +18,21 @@ services:
       retries: 5
     networks:
       - schema-compare-test
+
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:latest
+    container_name: schema-compare-toxiproxy
+    ports:
+      - "5433:5432"  # Proxy for PostgreSQL
+      - "8474:8474"  # Toxiproxy API
+    networks:
+      - schema-compare-test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    volumes:
+      - ./toxiproxy.json:/config/toxiproxy.json:ro
+    command: ["-host", "0.0.0.0", "-config", "/config/toxiproxy.json"]
 
 volumes:
   postgres-test-data:

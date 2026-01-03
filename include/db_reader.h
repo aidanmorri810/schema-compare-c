@@ -50,14 +50,14 @@ CreateTableStmt **db_read_all_tables(DBConnection *conn,
 
 /* Helper functions for building CreateTableStmt from database */
 bool db_populate_table_info(DBConnection *conn, const char *schema,
-                            const char *table_name, CreateTableStmt *stmt,
+                            CreateTableStmt **stmts, int stmt_count,
                             MemoryContext *mem_ctx);
 bool db_populate_columns(DBConnection *conn, const char *schema,
-                        const char *table_name, CreateTableStmt *stmt,
+                        CreateTableStmt **stmts, int stmt_count,
                         MemoryContext *mem_ctx);
 bool db_populate_constraints(DBConnection *conn, const char *schema,
-                            const char *table_name, CreateTableStmt *stmt,
-                            MemoryContext *mem_ctx);
+                             CreateTableStmt **stmts, int stmt_count,
+                             MemoryContext *mem_ctx);
 
 /* Utility functions */
 char *db_escape_identifier(const char *identifier);
