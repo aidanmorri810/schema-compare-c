@@ -509,6 +509,112 @@ static bool constraint_infos_equivalent(const ConstraintInfo *c1, const Constrai
     return false;
 }
 
+/* Helper to check if a set of column-level PK constraints matches a table-level PK */
+static bool column_pks_match_table_pk(const ConstraintInfo *source_constraints, int source_count,
+                                     const bool *source_matched,
+                                     const TablePrimaryKeyConstraint *table_pk,
+                                     const CompareOptions *opts,
+                                     int *matched_indices, int *matched_count) {
+    *matched_count = 0;
+
+    /* Count unmatched column-level PRIMARY KEY constraints */
+    int available_count = 0;
+    for (int i = 0; i < source_count; i++) {
+        if (!source_matched[i] &&
+            source_constraints[i].column_constraint &&
+            source_constraints[i].constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY) {
+            available_count++;
+        }
+    }
+
+    /* Must have same number of columns */
+    if (available_count != table_pk->column_count) {
+        return false;
+    }
+
+    /* Check if all table PK columns have corresponding column-level PK constraints */
+    for (int pk_col = 0; pk_col < table_pk->column_count; pk_col++) {
+        bool found = false;
+
+        for (int i = 0; i < source_count; i++) {
+            if (source_matched[i]) {
+                continue;
+            }
+
+            if (source_constraints[i].column_constraint &&
+                source_constraints[i].constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY &&
+                names_equal(source_constraints[i].column_name, table_pk->columns[pk_col], opts)) {
+
+                /* Found matching column */
+                matched_indices[*matched_count] = i;
+                (*matched_count)++;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            *matched_count = 0;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/* Helper to check if a set of column-level UNIQUE constraints matches a table-level UNIQUE */
+static bool column_uniques_match_table_unique(const ConstraintInfo *source_constraints, int source_count,
+                                              const bool *source_matched,
+                                              const TableUniqueConstraint *table_uniq,
+                                              const CompareOptions *opts,
+                                              int *matched_indices, int *matched_count) {
+    *matched_count = 0;
+
+    /* Count unmatched column-level UNIQUE constraints */
+    int available_count = 0;
+    for (int i = 0; i < source_count; i++) {
+        if (!source_matched[i] &&
+            source_constraints[i].column_constraint &&
+            source_constraints[i].constraint_type == TABLE_CONSTRAINT_UNIQUE) {
+            available_count++;
+        }
+    }
+
+    /* Must have same number of columns */
+    if (available_count != table_uniq->column_count) {
+        return false;
+    }
+
+    /* Check if all table UNIQUE columns have corresponding column-level UNIQUE constraints */
+    for (int uniq_col = 0; uniq_col < table_uniq->column_count; uniq_col++) {
+        bool found = false;
+
+        for (int i = 0; i < source_count; i++) {
+            if (source_matched[i]) {
+                continue;
+            }
+
+            if (source_constraints[i].column_constraint &&
+                source_constraints[i].constraint_type == TABLE_CONSTRAINT_UNIQUE &&
+                names_equal(source_constraints[i].column_name, table_uniq->columns[uniq_col], opts)) {
+
+                /* Found matching column */
+                matched_indices[*matched_count] = i;
+                (*matched_count)++;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            *matched_count = 0;
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /* Compare constraints between two tables */
 void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *target,
                         TableDiff *result, const CompareOptions *opts, MemoryContext *mem_ctx) {
@@ -663,6 +769,7 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
         const ConstraintInfo *target_c = &target_constraints[i];
         bool found_match = false;
 
+        /* First, try direct equivalence check */
         for (int j = 0; j < source_count; j++) {
             if (source_matched[j]) {
                 continue;
@@ -675,6 +782,39 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
                 target_matched[i] = true;
                 found_match = true;
                 break;
+            }
+        }
+
+        /* If not found and target is a table-level PK/UNIQUE, check if it matches multiple column-level constraints */
+        if (!found_match && target_c->table_constraint) {
+            if (target_c->constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY) {
+                const TablePrimaryKeyConstraint *table_pk = &target_c->table_constraint->constraint.primary_key;
+                int matched_indices[32]; /* Reasonable max for composite PK */
+                int matched_count = 0;
+
+                if (column_pks_match_table_pk(source_constraints, source_count, source_matched,
+                                             table_pk, opts, matched_indices, &matched_count)) {
+                    /* Mark all matched column-level PKs as matched */
+                    for (int k = 0; k < matched_count; k++) {
+                        source_matched[matched_indices[k]] = true;
+                    }
+                    target_matched[i] = true;
+                    found_match = true;
+                }
+            } else if (target_c->constraint_type == TABLE_CONSTRAINT_UNIQUE) {
+                const TableUniqueConstraint *table_uniq = &target_c->table_constraint->constraint.unique;
+                int matched_indices[32];
+                int matched_count = 0;
+
+                if (column_uniques_match_table_unique(source_constraints, source_count, source_matched,
+                                                     table_uniq, opts, matched_indices, &matched_count)) {
+                    /* Mark all matched column-level UNIQUE constraints as matched */
+                    for (int k = 0; k < matched_count; k++) {
+                        source_matched[matched_indices[k]] = true;
+                    }
+                    target_matched[i] = true;
+                    found_match = true;
+                }
             }
         }
 
@@ -692,6 +832,17 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
             if (cd) {
                 cd->added = true;
                 cd->new_type = target_c->constraint_type;
+
+                /* Store constraint pointers for SQL generation */
+                if (target_c->table_constraint) {
+                    cd->target_constraint = target_c->table_constraint;
+                    cd->is_column_constraint = false;
+                } else if (target_c->column_constraint) {
+                    cd->target_constraint = target_c->column_constraint;
+                    cd->column_name = target_c->column_name;
+                    cd->is_column_constraint = true;
+                }
+
                 result->constraint_add_count++;
 
                 if (last_added) {
@@ -725,6 +876,44 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
     for (int i = 0; i < source_count; i++) {
         if (!source_matched[i]) {
             const ConstraintInfo *source_c = &source_constraints[i];
+            bool found_reverse_match = false;
+
+            /* Check reverse case: source table-level PK/UNIQUE matching target column-level constraints */
+            if (source_c->table_constraint) {
+                if (source_c->constraint_type == TABLE_CONSTRAINT_PRIMARY_KEY) {
+                    const TablePrimaryKeyConstraint *table_pk = &source_c->table_constraint->constraint.primary_key;
+                    int matched_indices[32];
+                    int matched_count = 0;
+
+                    if (column_pks_match_table_pk(target_constraints, target_count, target_matched,
+                                                 table_pk, opts, matched_indices, &matched_count)) {
+                        /* Mark all matched column-level PKs as matched */
+                        for (int k = 0; k < matched_count; k++) {
+                            target_matched[matched_indices[k]] = true;
+                        }
+                        source_matched[i] = true;
+                        found_reverse_match = true;
+                    }
+                } else if (source_c->constraint_type == TABLE_CONSTRAINT_UNIQUE) {
+                    const TableUniqueConstraint *table_uniq = &source_c->table_constraint->constraint.unique;
+                    int matched_indices[32];
+                    int matched_count = 0;
+
+                    if (column_uniques_match_table_unique(target_constraints, target_count, target_matched,
+                                                         table_uniq, opts, matched_indices, &matched_count)) {
+                        /* Mark all matched column-level UNIQUE constraints as matched */
+                        for (int k = 0; k < matched_count; k++) {
+                            target_matched[matched_indices[k]] = true;
+                        }
+                        source_matched[i] = true;
+                        found_reverse_match = true;
+                    }
+                }
+            }
+
+            if (found_reverse_match) {
+                continue;
+            }
 
             const char *constraint_name = NULL;
             if (source_c->table_constraint && source_c->table_constraint->constraint_name) {
@@ -738,6 +927,17 @@ void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *t
             if (cd) {
                 cd->removed = true;
                 cd->old_type = source_c->constraint_type;
+
+                /* Store constraint pointers for SQL generation */
+                if (source_c->table_constraint) {
+                    cd->source_constraint = source_c->table_constraint;
+                    cd->is_column_constraint = false;
+                } else if (source_c->column_constraint) {
+                    cd->source_constraint = source_c->column_constraint;
+                    cd->column_name = source_c->column_name;
+                    cd->is_column_constraint = true;
+                }
+
                 result->constraint_remove_count++;
 
                 if (last_removed) {

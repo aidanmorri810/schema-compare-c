@@ -84,16 +84,31 @@ ColumnDiff *compare_column_details(const ColumnDef *source, const ColumnDef *tar
     }
 
     /* Compare COLLATE */
-    if (!names_equal(source->collation, target->collation, opts)) {
-        cd->collation_changed = true;
-        cd->old_collation = source->collation;
-        cd->new_collation = target->collation;
-        has_changes = true;
+    /* Only report collation change if both are explicitly set and different */
+    /* Ignore "default" collation as it's the same as NULL */
+    const char *src_collation = (source->collation && strcmp(source->collation, "default") == 0) ? NULL : source->collation;
+    const char *tgt_collation = (target->collation && strcmp(target->collation, "default") == 0) ? NULL : target->collation;
+
+    if (!names_equal(src_collation, tgt_collation, opts)) {
+        /* Only report if there's a real difference (both non-NULL and different) */
+        if (src_collation && tgt_collation) {
+            cd->collation_changed = true;
+            cd->old_collation = source->collation;
+            cd->new_collation = target->collation;
+            has_changes = true;
+        }
     }
 
     /* Compare STORAGE */
+    /* Only report storage change if explicitly different from type defaults */
+    /* Database reader sets has_storage=true for all columns with their default storage,
+     * but file definitions don't include STORAGE clause unless overriding the default.
+     * We should only flag this as a change if the storage is explicitly different. */
     if (source->has_storage && target->has_storage) {
-        if (source->storage_type != target->storage_type) {
+        /* Only report if storage types are explicitly different */
+        if (source->storage_type != target->storage_type &&
+            source->storage_type != STORAGE_TYPE_DEFAULT &&
+            target->storage_type != STORAGE_TYPE_DEFAULT) {
             cd->storage_changed = true;
             const char *old_storage = (source->storage_type == STORAGE_TYPE_PLAIN) ? "PLAIN" :
                                      (source->storage_type == STORAGE_TYPE_EXTERNAL) ? "EXTERNAL" :
@@ -107,10 +122,9 @@ ColumnDiff *compare_column_details(const ColumnDef *source, const ColumnDef *tar
             cd->new_storage = (char *)new_storage;
             has_changes = true;
         }
-    } else if (source->has_storage != target->has_storage) {
-        cd->storage_changed = true;
-        has_changes = true;
     }
+    /* Don't report storage change if only one side has it set, as this is likely
+     * just a difference between database introspection and file parsing */
 
     /* Compare COMPRESSION */
     if (!names_equal(source->compression_method, target->compression_method, opts)) {
@@ -179,6 +193,8 @@ void compare_columns(const CreateTableStmt *source, const CreateTableStmt *targe
             ColumnDiff *cd = column_diff_create(target_col->column_name);
             if (cd) {
                 cd->new_type = target_col->data_type;
+                cd->new_nullable = !column_is_not_null(target_col);
+                cd->new_default = (char *)get_column_default(target_col);
                 result->column_add_count++;
 
                 if (last_added) {

@@ -88,6 +88,12 @@ typedef struct ConstraintDiff {
     char *old_definition;
     char *new_definition;
 
+    /* Pointers to actual constraint structures for SQL generation */
+    const void *source_constraint;  /* Points to TableConstraint or ColumnConstraint */
+    const void *target_constraint;  /* Points to TableConstraint or ColumnConstraint */
+    const char *column_name;        /* For column-level constraints */
+    bool is_column_constraint;      /* true if constraint is column-level */
+
     struct ConstraintDiff *next;
 } ConstraintDiff;
 

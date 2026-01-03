@@ -148,30 +148,8 @@ bool db_populate_constraints(DBConnection *conn, const char *schema,
                                             }
                                             constraint->constraint.unique.columns[idx++] = mem_strdup(mem_ctx, col_name);
 
-                                            /* Add UNIQUE constraint to the column */
-                                            if (stmt->table_def.regular.elements) {
-                                                TableElement *elem = stmt->table_def.regular.elements;
-                                                bool found = false;
-                                                while (elem && !found) {
-                                                    if (elem->type == TABLE_ELEM_COLUMN) {
-                                                        if (strcmp(elem->elem.column.column_name, col_name) == 0) {
-                                                            /* Add UNIQUE constraint to this column */
-                                                            ColumnConstraint *unique_constraint = column_constraint_alloc(mem_ctx);
-                                                            if (unique_constraint) {
-                                                                unique_constraint->type = CONSTRAINT_UNIQUE;
-                                                                unique_constraint->constraint_name = NULL;
-                                                                unique_constraint->has_deferrable = false;
-                                                                unique_constraint->has_initially = false;
-                                                                unique_constraint->has_enforced = false;
-                                                                unique_constraint->next = elem->elem.column.constraints;
-                                                                elem->elem.column.constraints = unique_constraint;
-                                                            }
-                                                            found = true;
-                                                        }
-                                                    }
-                                                    elem = elem->next;
-                                                }
-                                            }
+                                            /* Don't add duplicate column-level UNIQUE constraints - the table-level constraint is sufficient.
+                                             * The comparison code will match table-level to column-level constraints automatically. */
                                         }
                                         col_name = strtok_r(NULL, ", ", &saveptr);
                                     }
@@ -198,9 +176,14 @@ bool db_populate_constraints(DBConnection *conn, const char *schema,
 
             case 'p': /* PRIMARY KEY constraint */
                 constraint->type = TABLE_CONSTRAINT_PRIMARY_KEY;
-                /* Parse column list from definition and add PRIMARY KEY constraint to columns */
+                /* Parse column list from definition */
                 /* Definition format: "PRIMARY KEY (col1, col2, ...)" */
                 {
+                    /* Initialize the primary key constraint */
+                    constraint->constraint.primary_key.columns = NULL;
+                    constraint->constraint.primary_key.column_count = 0;
+                    constraint->constraint.primary_key.index_params = NULL;
+
                     const char *pk_start = strstr(condef, "PRIMARY KEY (");
                     if (pk_start) {
                         pk_start += 13; /* Skip "PRIMARY KEY (" */
@@ -212,50 +195,44 @@ bool db_populate_constraints(DBConnection *conn, const char *schema,
                                 memcpy(cols_str, pk_start, cols_len);
                                 cols_str[cols_len] = '\0';
 
-                                /* Parse comma-separated column list and add PK constraint to each */
-                                char *saveptr = NULL;
-                                char *col_name = strtok_r(cols_str, ", ", &saveptr);
-                                while (col_name) {
-                                    /* Trim whitespace from column name */
-                                    while (*col_name == ' ') col_name++;
+                                /* Count columns */
+                                int col_count = 1;
+                                for (size_t i = 0; i < cols_len; i++) {
+                                    if (cols_str[i] == ',') col_count++;
+                                }
 
-                                    /* Skip empty strings after trimming */
-                                    if (*col_name == '\0') {
-                                        col_name = strtok_r(NULL, ", ", &saveptr);
-                                        continue;
-                                    }
+                                /* Allocate column array */
+                                constraint->constraint.primary_key.columns = mem_alloc(mem_ctx, sizeof(char*) * col_count);
+                                if (constraint->constraint.primary_key.columns) {
+                                    /* Parse comma-separated column list */
+                                    char *saveptr = NULL;
+                                    char *col_name = strtok_r(cols_str, ", ", &saveptr);
+                                    int idx = 0;
+                                    while (col_name && idx < col_count) {
+                                        /* Trim whitespace from column name */
+                                        while (*col_name == ' ') col_name++;
 
-                                    char *end = col_name + strlen(col_name) - 1;
-                                    while (end > col_name && *end == ' ') {
-                                        *end = '\0';
-                                        end--;
-                                    }
-
-                                    /* Find the column in the table elements */
-                                    if (stmt->table_def.regular.elements) {
-                                        TableElement *elem = stmt->table_def.regular.elements;
-                                        bool found = false;
-                                        while (elem && !found) {
-                                            if (elem->type == TABLE_ELEM_COLUMN) {
-                                                if (strcmp(elem->elem.column.column_name, col_name) == 0) {
-                                                    /* Add PRIMARY KEY constraint to this column */
-                                                    ColumnConstraint *pk_constraint = column_constraint_alloc(mem_ctx);
-                                                    if (pk_constraint) {
-                                                        pk_constraint->type = CONSTRAINT_PRIMARY_KEY;
-                                                        pk_constraint->constraint_name = NULL;
-                                                        pk_constraint->has_deferrable = false;
-                                                        pk_constraint->has_initially = false;
-                                                        pk_constraint->has_enforced = false;
-                                                        pk_constraint->next = elem->elem.column.constraints;
-                                                        elem->elem.column.constraints = pk_constraint;
-                                                    }
-                                                    found = true;
-                                                }
-                                            }
-                                            elem = elem->next;
+                                        /* Skip empty strings after trimming */
+                                        if (*col_name == '\0') {
+                                            col_name = strtok_r(NULL, ", ", &saveptr);
+                                            continue;
                                         }
+
+                                        char *end = col_name + strlen(col_name) - 1;
+                                        while (end > col_name && *end == ' ') {
+                                            *end = '\0';
+                                            end--;
+                                        }
+
+                                        /* Store column name in constraint */
+                                        constraint->constraint.primary_key.columns[idx++] = mem_strdup(mem_ctx, col_name);
+
+                                        /* Don't add duplicate column-level PRIMARY KEY constraints - the table-level constraint is sufficient.
+                                         * The comparison code will match table-level to column-level constraints automatically. */
+
+                                        col_name = strtok_r(NULL, ", ", &saveptr);
                                     }
-                                    col_name = strtok_r(NULL, ", ", &saveptr);
+                                    constraint->constraint.primary_key.column_count = idx;
                                 }
                                 free(cols_str);
                             }
