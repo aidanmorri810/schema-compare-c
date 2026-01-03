@@ -23,6 +23,8 @@ typedef struct {
     bool has_destructive_changes;  /* Contains DROP or data-loss operations */
 } SQLMigration;
 
+/* ========== ORCHESTRATION (sql_generator.c) ========== */
+
 /* Initialize default SQL generation options */
 SQLGenOptions *sql_gen_options_default(void);
 void sql_gen_options_free(SQLGenOptions *opts);
@@ -31,9 +33,16 @@ void sql_gen_options_free(SQLGenOptions *opts);
 SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions *opts);
 void sql_migration_free(SQLMigration *migration);
 
-/* Generate SQL for specific changes */
+/* Write migration to file */
+bool write_migration_to_file(const SQLMigration *migration, const char *filename);
+
+/* ========== TABLE OPERATIONS (sql_generator_table.c) ========== */
+
 char *generate_create_table_sql(const CreateTableStmt *stmt, const SQLGenOptions *opts);
 char *generate_drop_table_sql(const char *table_name, const SQLGenOptions *opts);
+
+/* ========== COLUMN OPERATIONS (sql_generator_column.c) ========== */
+
 char *generate_add_column_sql(const char *table_name, const ColumnDiff *col,
                               const SQLGenOptions *opts);
 char *generate_drop_column_sql(const char *table_name, const char *column_name,
@@ -44,17 +53,18 @@ char *generate_alter_column_nullable_sql(const char *table_name, const ColumnDif
                                          const SQLGenOptions *opts);
 char *generate_alter_column_default_sql(const char *table_name, const ColumnDiff *col,
                                         const SQLGenOptions *opts);
+
+/* ========== CONSTRAINT OPERATIONS (sql_generator_constraint.c) ========== */
+
 char *generate_add_constraint_sql(const char *table_name, const ConstraintDiff *constraint,
                                   const SQLGenOptions *opts);
 char *generate_drop_constraint_sql(const char *table_name, const char *constraint_name,
                                    const SQLGenOptions *opts);
 
-/* SQL utilities */
+/* ========== UTILITIES (sql_generator_util.c) ========== */
+
 char *quote_identifier(const char *identifier);
 char *quote_literal(const char *literal);
 char *format_data_type(const char *type);
-
-/* Write migration to file */
-bool write_migration_to_file(const SQLMigration *migration, const char *filename);
 
 #endif /* SQL_GENERATOR_H */
