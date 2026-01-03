@@ -5,7 +5,8 @@ CC = gcc
 CFLAGS = -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L
 LDFLAGS = -lpq
 DEBUG_FLAGS = -g -O0 -DDEBUG
-RELEASE_FLAGS = -O2 -DNDEBUG
+RELEASE_FLAGS = -Oz -DNDEBUG -s -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
+RELEASE_LDFLAGS = -lpq -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
 
 # Directories
 SRC_DIR = src
@@ -54,6 +55,7 @@ all: dirs $(TARGET)
 
 # Release build
 release: CFLAGS += $(RELEASE_FLAGS)
+release: LDFLAGS = $(RELEASE_LDFLAGS)
 release: clean $(TARGET)
 
 # Debug build
@@ -88,6 +90,7 @@ $(OBJ_DIR)/test/%.o: $(TEST_DIR)/%.c
 
 # Link main executable (only if main.c exists)
 $(TARGET): $(OBJS)
+	@mkdir -p $(BIN_DIR)
 	@if [ -f $(MAIN_SRC) ]; then \
 		$(CC) $(OBJS) $(LDFLAGS) -o $@; \
 		echo "Built $(TARGET)"; \
