@@ -2,17 +2,37 @@
 
 # Compiler and flags
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L
-LDFLAGS = -lpq
+
+# Use pg_config to locate PostgreSQL libraries and headers for cross-platform compatibility
+PG_CONFIG_CFLAGS := $(shell pg_config --cflags)
+PG_CONFIG_LDFLAGS := $(shell pg_config --ldflags)
+PG_LIBDIR := $(shell pg_config --libdir)
+PG_INCLUDEDIR := $(shell pg_config --includedir)
+
+# Extract only include paths and essential flags, filter out warning flags from pg_config
+PG_CFLAGS := $(filter -I% -D% -f%,$(PG_CONFIG_CFLAGS))
+# Ensure include directory is present
+ifeq ($(findstring -I$(PG_INCLUDEDIR),$(PG_CFLAGS)),)
+PG_CFLAGS += -I$(PG_INCLUDEDIR)
+endif
+
+# Ensure library directory is in linker flags
+PG_LDFLAGS := $(PG_CONFIG_LDFLAGS)
+ifeq ($(findstring $(PG_LIBDIR),$(PG_LDFLAGS)),)
+PG_LDFLAGS += -L$(PG_LIBDIR)
+endif
+
+CFLAGS = -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L $(PG_CFLAGS)
+LDFLAGS = $(PG_LDFLAGS) -lpq
 DEBUG_FLAGS = -g -O0 -DDEBUG
 RELEASE_FLAGS = -Oz -DNDEBUG -s -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
 
 # Platform-specific linker flags
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-    RELEASE_LDFLAGS = -lpq -flto -Wl,-dead_strip
+    RELEASE_LDFLAGS = -flto -Wl,-dead_strip
 else
-    RELEASE_LDFLAGS = -lpq -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
+    RELEASE_LDFLAGS = -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
 endif
 
 # Directories
@@ -62,7 +82,8 @@ all: dirs $(TARGET)
 
 # Release build
 release: CFLAGS += $(RELEASE_FLAGS)
-release: LDFLAGS = $(RELEASE_LDFLAGS)
+# Append release-specific linker flags rather than overwriting LDFLAGS so we keep $(PG_LDFLAGS) and -lpq
+release: LDFLAGS += $(RELEASE_LDFLAGS)
 release: clean $(TARGET)
 
 # Debug build
