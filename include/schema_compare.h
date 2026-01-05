@@ -35,7 +35,8 @@ typedef struct {
 /* Application context */
 typedef struct {
     SchemaSource *source;
-    SchemaSource *target;
+    SchemaSource **targets;          /* Array of target schemas */
+    int target_count;                /* Number of targets */
     CompareOptions *compare_opts;
     ReportOptions *report_opts;
     SQLGenOptions *sql_opts;
@@ -48,6 +49,8 @@ typedef struct {
 
     bool verbose;
     bool quiet;
+
+    char *schema_name_override;      /* Override schema name from --schema */
 } AppContext;
 
 /* Initialize and free application context */

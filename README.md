@@ -1,188 +1,222 @@
 # PostgreSQL Schema Compare Tool
 
-A modular C tool for comparing PostgreSQL schemas between DDL files and live databases.
+A high-performance C tool for comparing and synchronizing PostgreSQL schemas between DDL files and live databases.
 
-## Overview
+## Quick Start
 
-This tool compares PostgreSQL table definitions from:
-- DDL files (`.sql` files containing CREATE TABLE statements)
-- Live PostgreSQL databases
+```bash
+# Build the tool
+make
 
-It generates:
-- Human-readable difference reports
-- SQL migration scripts (ALTER TABLE statements) to synchronize schemas
+# Compare directory schema to database and generate migration
+schema-compare --source ./schema/ --target postgresql://user:pass@localhost:5432/mydb --output migration.sql
+
+# Update multiple databases with a single migration file
+schema-compare --source ./schema/ --target postgresql://user:pass@prod:5432/db1 --target postgresql://user:pass@prod:5432/db2 --output migration.sql
+```
 
 ## Features
 
-- **Modular Architecture**: Clean separation between parsing, database introspection, comparison, and output generation
-- **Memory Management**: Context-based allocation system prevents memory leaks
-- **Extensible**: Easy to add support for new DDL types (indexes, views, functions)
-- **Multiple Output Formats**: Text reports and SQL migration scripts
+- **Multi-Target Migrations**: Generate a single migration SQL file that can update multiple target databases
+- **Flexible Source Input**: Compare from DDL files in directories or directly from a source database
+- **Database-to-Database Comparison**: Synchronize schemas between production, staging, and development environments
+- **SQL Migration Generation**: Automatically generates ALTER TABLE, CREATE TABLE, and DROP statements
+- **Memory Safe**: Context-based memory management prevents leaks in complex operations
+- **Transaction Support**: Wraps migrations in transactions for safe rollback (optional)
+- **Schema Filtering**: Target specific schemas within databases
 
-## Build Status
-
-**Phase 1 Complete**: Foundation modules implemented
-- ✓ Memory management system
-- ✓ Utility modules (strings, errors, hash tables, file I/O)
-- ✓ Build system (Makefile)
-
-## Building
+## Installation
 
 ### Prerequisites
 
 - GCC or compatible C compiler
-- PostgreSQL development libraries (`libpq-dev` on Debian/Ubuntu)
+- PostgreSQL development libraries:
+  - Debian/Ubuntu: `sudo apt-get install libpq-dev`
+  - RHEL/CentOS: `sudo yum install postgresql-devel`
+  - macOS: `brew install postgresql`
 - GNU Make
 
-### Compilation
+### Build
 
 ```bash
-# Build library (development)
-make lib
+# Clone the repository
+git clone <repository-url>
+cd schema-compare-c
 
-# Build full application (when main.c is implemented)
-make
-
-# Debug build
-make debug
-
-# Release build
+# Build release version
 make release
 
-# Clean build artifacts
-make clean
+# Install (optional)
+sudo make install
 ```
 
-## Project Structure
+## Usage
 
-```
-schema-compare-c/
-├── include/           # Header files
-│   ├── pg_create_table.h  # PostgreSQL DDL structures
-│   ├── memory.h           # Memory management API
-│   └── utils.h            # Utility functions
-├── src/
-│   ├── memory/        # Memory context implementation
-│   ├── utils/         # String utils, errors, hash tables, file I/O
-│   ├── parser/        # DDL parser (to be implemented)
-│   ├── db_reader/     # Database introspection (to be implemented)
-│   ├── compare/       # Schema comparison engine (to be implemented)
-│   └── output/        # Report and SQL generation (to be implemented)
-├── tests/             # Unit tests (to be implemented)
-├── Makefile           # Build system
-└── README.md          # This file
-```
-
-## Architecture
-
-### Module Design
-
-```
-Parser Module ──→ CreateTableStmt structures ←── DB Reader Module
-                         ↓
-                  Memory Manager
-                         ↓
-                  Comparison Engine
-                         ↓
-          ┌──────────────┴──────────────┐
-    Report Generator           SQL Generator
-```
-
-### Key Components
-
-#### 1. Memory Management (`memory.h/c`)
-- Context-based allocation tracking
-- Automatic cleanup when context is destroyed
-- Prevents memory leaks in complex data structures
-
-#### 2. Utilities (`utils.h`)
-- **String utilities**: trim, concat, split, case conversion
-- **String builder**: Efficient string concatenation
-- **Error handling**: Structured error reporting
-- **Logging**: Debug, info, warn, error levels
-- **Hash tables**: O(1) lookups for schema comparison
-- **File I/O**: Read files, scan directories
-
-#### 3. DDL Structures (`pg_create_table.h`)
-Complete representation of PostgreSQL CREATE TABLE syntax:
-- Regular tables, typed tables, partition tables
-- All constraint types (NOT NULL, CHECK, UNIQUE, PK, FK, EXCLUDE)
-- Partitioning (RANGE, LIST, HASH)
-- Storage parameters, tablespaces, inheritance
-
-## Development Roadmap
-
-### Phase 1: Foundation ✓
-- [x] Memory management
-- [x] Utility modules
-- [x] Build system
-
-### Phase 2: Parser (In Progress)
-- [ ] Lexer/tokenizer
-- [ ] Recursive descent parser
-- [ ] CREATE TABLE parsing
-- [ ] Constraint parsing
-- [ ] Partition specification parsing
-
-### Phase 3: Database Reader
-- [ ] libpq connection management
-- [ ] System catalog queries
-- [ ] Build CreateTableStmt from database
-
-### Phase 4: Comparison Engine
-- [ ] Schema-level comparison
-- [ ] Table-level comparison
-- [ ] Column and constraint comparison
-- [ ] Difference detection and categorization
-
-### Phase 5: Output Generation
-- [ ] Human-readable text reports
-- [ ] SQL migration script generation
-- [ ] Dependency ordering
-
-### Phase 6: CLI Application
-- [ ] Command-line argument parsing
-- [ ] Workflow orchestration
-- [ ] Main entry point
-
-### Phase 7: Testing
-- [ ] Unit tests for each module
-- [ ] Integration tests
-- [ ] Test fixtures
-
-## Usage (Planned)
+### Command Syntax
 
 ```bash
-# Compare database schema to DDL files
-schema-compare --source db://localhost/mydb --target ./ddl-files/ --report text
-
-# Generate SQL migration script
-schema-compare --source ./ddl-v1/ --target ./ddl-v2/ --output migration.sql
-
-# Compare two databases
-schema-compare --source db://prod/appdb --target db://dev/appdb --schema public
+schema-compare --source SOURCE --target TARGET [--target TARGET2 ...] [OPTIONS]
 ```
 
-## Extending the Tool
+### Source Options
 
-The modular design makes it easy to extend:
+The `--source` can be:
+- **Directory path**: A directory containing `.sql` DDL files
+  - Example: `--source ./schema/`
+  - Example: `--source /path/to/ddl/files/`
+- **Database URI**: A PostgreSQL database connection string
+  - Example: `--source postgresql://user:password@host:5432/database`
 
-### Adding New DDL Types (e.g., CREATE INDEX)
-1. Create structure definitions (e.g., `pg_create_index.h`)
-2. Add parser functions (e.g., `parse_index.c`)
-3. Add database introspection (e.g., `db_index.c`)
-4. Add comparison logic (e.g., `compare_index.c`)
-5. Add SQL generation (e.g., `sql_gen_index.c`)
+### Target Options
 
-### Adding Output Formats (e.g., JSON)
-1. Implement format generator (e.g., `generate_json_report()`)
-2. Register in report module
-3. Add CLI option
+The `--target` must be a PostgreSQL database URI (directories are not supported as targets):
+- **Database URI**: `postgresql://user:password@host:port/database`
+- **Multiple targets**: Specify `--target` multiple times to generate a single migration for multiple databases
+
+### Common Options
+
+- `--output FILE` or `-o FILE`: Write migration SQL to file (default: stdout)
+- `--schema SCHEMA`: Specify schema name (default: `public`)
+- `--no-transactions`: Don't wrap SQL in BEGIN/COMMIT transactions
+- `--verbose` or `-v`: Enable verbose logging
+- `--quiet` or `-q`: Suppress non-error output
+- `--help` or `-h`: Show help message
+- `--version` or `-V`: Show version information
+
+## Examples
+
+### Compare Directory Schema to Single Database
+
+```bash
+schema-compare --source ./schema/ --target postgresql://admin:secret@localhost:5432/production --output migrate.sql
+```
+
+Generates `migrate.sql` with ALTER/CREATE/DROP statements to make the `production` database match the DDL files in `./schema/`.
+
+### Compare Directory Schema to Multiple Databases
+
+```bash
+schema-compare \
+  --source ./schema/ \
+  --target postgresql://user:pass@db1.example.com:5432/app \
+  --target postgresql://user:pass@db2.example.com:5432/app \
+  --output migration.sql
+```
+
+Generates a single `migration.sql` file that can be applied to both target databases to bring them in sync with the schema directory.
+
+### Compare One Database to Another
+
+```bash
+schema-compare \
+  --source postgresql://user:pass@prod.example.com:5432/maindb \
+  --target postgresql://user:pass@staging.example.com:5432/maindb \
+  --output sync-staging.sql
+```
+
+Generates SQL to make the staging database match the production database schema.
+
+### Specify Non-Public Schema
+
+```bash
+schema-compare \
+  --source ./schema/ \
+  --target postgresql://user:pass@localhost:5432/mydb \
+  --schema inventory \
+  --output migration.sql
+```
+
+Compares and generates migration for the `inventory` schema instead of the default `public` schema.
+
+### Generate Migration Without Transactions
+
+```bash
+schema-compare \
+  --source ./schema/ \
+  --target postgresql://user:pass@localhost:5432/mydb \
+  --no-transactions \
+  --output migration.sql
+```
+
+Generates migration SQL without wrapping statements in BEGIN/COMMIT, useful for manual execution or when specific transaction control is needed.
+
+## Connection String Format
+
+PostgreSQL connection URIs follow the standard format:
+
+```
+postgresql://[user[:password]@][host[:port]][/database][?parameters]
+```
+
+### Components
+
+- **Protocol**: `postgresql://` (required)
+- **User**: Database username (optional, defaults to system user)
+- **Password**: Database password (optional, prompted if omitted)
+- **Host**: Server hostname or IP (default: `localhost`)
+- **Port**: PostgreSQL port (default: `5432`)
+- **Database**: Database name (required)
+
+### Examples
+
+```bash
+# Full connection string
+postgresql://admin:secret@db.example.com:5432/production
+
+# Without password (will prompt)
+postgresql://admin@db.example.com:5432/production
+
+# Localhost with defaults
+postgresql://user:pass@localhost/mydb
+
+# With connection parameters
+postgresql://user:pass@host:5432/db?sslmode=require
+```
+
+### Security Note
+
+Avoid including passwords in command history. Consider using:
+- `.pgpass` file for password storage
+- Environment variables: `PGPASSWORD=secret schema-compare ...`
+- Connection strings without passwords (tool will prompt)
+
+## Output Format
+
+The tool generates SQL migration scripts containing:
+
+- **CREATE TABLE** statements for new tables
+- **ALTER TABLE** statements for schema modifications:
+  - ADD COLUMN for new columns
+  - DROP COLUMN for removed columns
+  - ALTER COLUMN for type/constraint changes
+  - ADD CONSTRAINT for new constraints
+  - DROP CONSTRAINT for removed constraints
+- **DROP TABLE** statements for removed tables (with CASCADE when needed)
+
+### Transaction Wrapping
+
+By default, migrations are wrapped in transactions:
+
+```sql
+BEGIN;
+
+-- Migration statements here
+
+COMMIT;
+```
+
+Use `--no-transactions` to disable this behavior.
+
+### Dependency Ordering
+
+The tool automatically orders statements to respect dependencies:
+1. DROP operations (constraints, then tables)
+2. CREATE TABLE operations
+3. ALTER TABLE operations
+4. ADD CONSTRAINT operations
+
+This ensures migrations can be executed without dependency errors.
 
 ## License
 
-[To be determined]
-
-## Contributing
-
-[To be determined]
+This project is licensed under the GNU General Public License v3.0 (GPLv3). See the LICENSE file for details.
