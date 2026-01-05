@@ -243,7 +243,7 @@ char *generate_report(const SchemaDiff *diff, const ReportOptions *opts) {
     }
 
     /* Footer */
-    if (diff->total_diffs == 0) {
+    if (diff->total_diffs == 0 && diff->tables_added == 0 && diff->tables_removed == 0) {
         if (opts->use_color) {
             sb_append_fmt(sb, "%s✓ No differences found%s\n", ANSI_GREEN, ANSI_RESET);
         } else {
