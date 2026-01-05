@@ -25,14 +25,14 @@ endif
 CFLAGS = -Wall -Wextra -Werror -std=c11 -Iinclude -D_POSIX_C_SOURCE=200809L $(PG_CFLAGS)
 LDFLAGS = $(PG_LDFLAGS) -lpq
 DEBUG_FLAGS = -g -O0 -DDEBUG
-RELEASE_FLAGS = -Oz -DNDEBUG -s -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
+RELEASE_FLAGS = -Oz -DNDEBUG -flto -ffunction-sections -fdata-sections -fno-asynchronous-unwind-tables -fno-unwind-tables
 
 # Platform-specific linker flags
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-    RELEASE_LDFLAGS = -flto -Wl,-dead_strip
+    RELEASE_LDFLAGS = -flto -Wl,-dead_strip,-s
 else
-    RELEASE_LDFLAGS = -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
+    RELEASE_LDFLAGS = -s -flto -Wl,--gc-sections,--hash-style=gnu,--as-needed
 endif
 
 # Directories
