@@ -907,8 +907,12 @@ int main(int argc, char **argv) {
 
         /* Compare schemas */
         log_info("Comparing schemas...");
-        SchemaDiff *diff = compare_schemas(source_tables, source_count,
-                                          target_tables, target_count,
+        /* Swap arguments: pass current state as 'source' and desired state as 'target' */
+        /* This makes the comparison logic work correctly: */
+        /* - Tables in 'target' (desired) but not in 'source' (current) = ADDED */
+        /* - Tables in 'source' (current) but not in 'target' (desired) = REMOVED */
+        SchemaDiff *diff = compare_schemas(target_tables, target_count,
+                                          source_tables, source_count,
                                           ctx->compare_opts, NULL);
 
         if (!diff) {
