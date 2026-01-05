@@ -3,8 +3,8 @@
 #include <stdlib.h>
 
 /* Forward declarations for functions defined in separate modules */
-char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLGenOptions *opts, bool skip_foreign_keys);
-char *generate_foreign_key_constraints(const CreateTableStmt *stmt, const SQLGenOptions *opts);
+void generate_create_table_sql_internal(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts, bool skip_foreign_keys);
+void generate_foreign_key_constraints(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts);
 
 /* Generate migration SQL from diff */
 SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions *opts) {
@@ -43,14 +43,10 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
     /* First pass: handle removed tables */
     for (TableDiff *td = diff->table_diffs; td; td = td->next) {
         if (td->table_removed) {
-            char *drop_sql = generate_drop_table_sql(td->table_name, opts);
-            if (drop_sql) {
-                sb_append(sb, drop_sql);
-                sb_append(sb, "\n");
-                free(drop_sql);
-                stmt_count++;
-                migration->has_destructive_changes = true;
-            }
+            generate_drop_table_sql(sb, td->table_name, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
+            migration->has_destructive_changes = true;
         }
     }
 
@@ -62,13 +58,9 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
     for (TableDiff *td = diff->table_diffs; td; td = td->next) {
         if (td->table_added && td->target_table) {
             /* Always skip foreign keys during CREATE TABLE */
-            char *create_sql = generate_create_table_sql_internal(td->target_table, opts, true);
-            if (create_sql) {
-                sb_append(sb, create_sql);
-                sb_append(sb, "\n");
-                free(create_sql);
-                stmt_count++;
-            }
+            generate_create_table_sql_internal(sb, td->target_table, opts, true);
+            sb_append(sb, "\n");
+            stmt_count++;
         } else if (td->table_added) {
             /* Fallback if table definition not available */
             if (opts->add_comments) {
@@ -86,47 +78,31 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
 
         /* Handle column changes */
         for (ColumnDiff *cd = td->columns_removed; cd; cd = cd->next) {
-            char *drop_sql = generate_drop_column_sql(td->table_name, cd->column_name, opts);
-            if (drop_sql) {
-                sb_append(sb, drop_sql);
-                sb_append(sb, "\n");
-                free(drop_sql);
-                stmt_count++;
-                migration->has_destructive_changes = true;
-            }
+            generate_drop_column_sql(sb, td->table_name, cd->column_name, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
+            migration->has_destructive_changes = true;
         }
 
         for (ColumnDiff *cd = td->columns_added; cd; cd = cd->next) {
-            char *add_sql = generate_add_column_sql(td->table_name, cd, opts);
-            if (add_sql) {
-                sb_append(sb, add_sql);
-                sb_append(sb, "\n");
-                free(add_sql);
-                stmt_count++;
-            }
+            generate_add_column_sql(sb, td->table_name, cd, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
         }
 
         for (ColumnDiff *cd = td->columns_modified; cd; cd = cd->next) {
             /* 1. Type changes first */
             if (cd->type_changed) {
-                char *alter_sql = generate_alter_column_type_sql(td->table_name, cd, opts);
-                if (alter_sql) {
-                    sb_append(sb, alter_sql);
-                    sb_append(sb, "\n");
-                    free(alter_sql);
-                    stmt_count++;
-                }
+                generate_alter_column_type_sql(sb, td->table_name, cd, opts);
+                sb_append(sb, "\n");
+                stmt_count++;
             }
 
             /* 2. Default changes before nullable - important when changing NULL -> NOT NULL */
             if (cd->default_changed) {
-                char *default_sql = generate_alter_column_default_sql(td->table_name, cd, opts);
-                if (default_sql) {
-                    sb_append(sb, default_sql);
-                    sb_append(sb, "\n");
-                    free(default_sql);
-                    stmt_count++;
-                }
+                generate_alter_column_default_sql(sb, td->table_name, cd, opts);
+                sb_append(sb, "\n");
+                stmt_count++;
             }
 
             /* 3. If changing from NULL to NOT NULL, add a warning about backfilling */
@@ -135,13 +111,9 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
                     sb_append(sb, "-- WARNING: Setting NOT NULL on nullable column\n");
                     sb_append(sb, "-- You may need to backfill NULL values first:\n");
                     sb_append(sb, "-- UPDATE ");
-                    char *quoted_table = quote_identifier(td->table_name);
-                    sb_append(sb, quoted_table);
-                    free(quoted_table);
+                    sb_append_identifier(sb, td->table_name);
                     sb_append(sb, " SET ");
-                    char *quoted_column = quote_identifier(cd->column_name);
-                    sb_append(sb, quoted_column);
-                    free(quoted_column);
+                    sb_append_identifier(sb, cd->column_name);
                     sb_append(sb, " = ");
                     if (cd->new_default) {
                         sb_append(sb, cd->new_default);
@@ -149,66 +121,44 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
                         sb_append(sb, "<default_value>");
                     }
                     sb_append(sb, " WHERE ");
-                    quoted_column = quote_identifier(cd->column_name);
-                    sb_append(sb, quoted_column);
-                    free(quoted_column);
+                    sb_append_identifier(sb, cd->column_name);
                     sb_append(sb, " IS NULL;\n");
                 }
             }
 
             /* 4. Nullable changes last */
             if (cd->nullable_changed) {
-                char *nullable_sql = generate_alter_column_nullable_sql(td->table_name, cd, opts);
-                if (nullable_sql) {
-                    sb_append(sb, nullable_sql);
-                    sb_append(sb, "\n");
-                    free(nullable_sql);
-                    stmt_count++;
-                }
+                generate_alter_column_nullable_sql(sb, td->table_name, cd, opts);
+                sb_append(sb, "\n");
+                stmt_count++;
             }
         }
 
         /* Handle constraint changes */
         for (ConstraintDiff *cd = td->constraints_removed; cd; cd = cd->next) {
-            char *drop_sql = generate_drop_constraint_sql(td->table_name, cd->constraint_name, opts);
-            if (drop_sql) {
-                sb_append(sb, drop_sql);
-                sb_append(sb, "\n");
-                free(drop_sql);
-                stmt_count++;
-                migration->has_destructive_changes = true;
-            }
+            generate_drop_constraint_sql(sb, td->table_name, cd->constraint_name, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
+            migration->has_destructive_changes = true;
         }
 
         for (ConstraintDiff *cd = td->constraints_added; cd; cd = cd->next) {
-            char *add_sql = generate_add_constraint_sql(td->table_name, cd, opts);
-            if (add_sql) {
-                sb_append(sb, add_sql);
-                sb_append(sb, "\n");
-                free(add_sql);
-                stmt_count++;
-            }
+            generate_add_constraint_sql(sb, td->table_name, cd, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
         }
 
         for (ConstraintDiff *cd = td->constraints_modified; cd; cd = cd->next) {
             /* Drop old constraint and add new one */
             if (cd->constraint_name) {
-                char *drop_sql = generate_drop_constraint_sql(td->table_name, cd->constraint_name, opts);
-                if (drop_sql) {
-                    sb_append(sb, drop_sql);
-                    sb_append(sb, "\n");
-                    free(drop_sql);
-                    stmt_count++;
-                }
-            }
-
-            char *add_sql = generate_add_constraint_sql(td->table_name, cd, opts);
-            if (add_sql) {
-                sb_append(sb, add_sql);
+                generate_drop_constraint_sql(sb, td->table_name, cd->constraint_name, opts);
                 sb_append(sb, "\n");
-                free(add_sql);
                 stmt_count++;
             }
+
+            generate_add_constraint_sql(sb, td->table_name, cd, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
         }
     }
 
@@ -219,13 +169,9 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
 
     for (TableDiff *td = diff->table_diffs; td; td = td->next) {
         if (td->table_added && td->target_table) {
-            char *fk_sql = generate_foreign_key_constraints(td->target_table, opts);
-            if (fk_sql) {
-                sb_append(sb, fk_sql);
-                sb_append(sb, "\n");
-                free(fk_sql);
-                stmt_count++;
-            }
+            generate_foreign_key_constraints(sb, td->target_table, opts);
+            sb_append(sb, "\n");
+            stmt_count++;
         }
     }
 

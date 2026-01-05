@@ -2,6 +2,7 @@
 #define SQL_GENERATOR_H
 
 #include "diff.h"
+#include "utils.h"
 #include <stdbool.h>
 
 /* SQL generation options */
@@ -38,33 +39,33 @@ bool write_migration_to_file(const SQLMigration *migration, const char *filename
 
 /* ========== TABLE OPERATIONS (sql_generator_table.c) ========== */
 
-char *generate_create_table_sql(const CreateTableStmt *stmt, const SQLGenOptions *opts);
-char *generate_drop_table_sql(const char *table_name, const SQLGenOptions *opts);
+void generate_create_table_sql(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts);
+void generate_drop_table_sql(StringBuilder *sb, const char *table_name, const SQLGenOptions *opts);
 
 /* ========== COLUMN OPERATIONS (sql_generator_column.c) ========== */
 
-char *generate_add_column_sql(const char *table_name, const ColumnDiff *col,
+void generate_add_column_sql(StringBuilder *sb, const char *table_name, const ColumnDiff *col,
                               const SQLGenOptions *opts);
-char *generate_drop_column_sql(const char *table_name, const char *column_name,
+void generate_drop_column_sql(StringBuilder *sb, const char *table_name, const char *column_name,
                                const SQLGenOptions *opts);
-char *generate_alter_column_type_sql(const char *table_name, const ColumnDiff *col,
+void generate_alter_column_type_sql(StringBuilder *sb, const char *table_name, const ColumnDiff *col,
                                      const SQLGenOptions *opts);
-char *generate_alter_column_nullable_sql(const char *table_name, const ColumnDiff *col,
+void generate_alter_column_nullable_sql(StringBuilder *sb, const char *table_name, const ColumnDiff *col,
                                          const SQLGenOptions *opts);
-char *generate_alter_column_default_sql(const char *table_name, const ColumnDiff *col,
+void generate_alter_column_default_sql(StringBuilder *sb, const char *table_name, const ColumnDiff *col,
                                         const SQLGenOptions *opts);
 
 /* ========== CONSTRAINT OPERATIONS (sql_generator_constraint.c) ========== */
 
-char *generate_add_constraint_sql(const char *table_name, const ConstraintDiff *constraint,
+void generate_add_constraint_sql(StringBuilder *sb, const char *table_name, const ConstraintDiff *constraint,
                                   const SQLGenOptions *opts);
-char *generate_drop_constraint_sql(const char *table_name, const char *constraint_name,
+void generate_drop_constraint_sql(StringBuilder *sb, const char *table_name, const char *constraint_name,
                                    const SQLGenOptions *opts);
 
 /* ========== UTILITIES (sql_generator_util.c) ========== */
 
-char *quote_identifier(const char *identifier);
-char *quote_literal(const char *literal);
+void sb_append_identifier(StringBuilder *sb, const char *identifier);
+void sb_append_literal(StringBuilder *sb, const char *literal);
 char *format_data_type(const char *type);
 
 #endif /* SQL_GENERATOR_H */

@@ -37,10 +37,10 @@ void sql_migration_free(SQLMigration *migration) {
     free(migration);
 }
 
-/* Quote SQL identifier */
-char *quote_identifier(const char *identifier) {
-    if (!identifier) {
-        return NULL;
+/* Append quoted SQL identifier to string builder */
+void sb_append_identifier(StringBuilder *sb, const char *identifier) {
+    if (!sb || !identifier) {
+        return;
     }
 
     /* Check if identifier needs quoting */
@@ -61,62 +61,46 @@ char *quote_identifier(const char *identifier) {
 
     /* Don't quote if not necessary */
     if (!needs_quote) {
-        return strdup(identifier);
+        sb_append(sb, identifier);
+        return;
     }
 
     /* Quote and escape */
-    size_t len = strlen(identifier);
-    char *quoted = malloc(len * 2 + 3);  /* Worst case: all quotes + surrounding quotes */
-    if (!quoted) {
-        return NULL;
-    }
-
-    char *dst = quoted;
-    *dst++ = '"';
+    sb_append(sb, "\"");
 
     for (const char *src = identifier; *src; src++) {
         if (*src == '"') {
-            *dst++ = '"';
-            *dst++ = '"';
+            sb_append(sb, "\"\"");
         } else {
-            *dst++ = *src;
+            sb_append_char(sb, *src);
         }
     }
 
-    *dst++ = '"';
-    *dst = '\0';
-
-    return quoted;
+    sb_append(sb, "\"");
 }
 
-/* Quote SQL literal */
-char *quote_literal(const char *literal) {
+/* Append quoted SQL literal to string builder */
+void sb_append_literal(StringBuilder *sb, const char *literal) {
+    if (!sb) {
+        return;
+    }
+
     if (!literal) {
-        return strdup("NULL");
+        sb_append(sb, "NULL");
+        return;
     }
 
-    size_t len = strlen(literal);
-    char *quoted = malloc(len * 2 + 3);
-    if (!quoted) {
-        return NULL;
-    }
-
-    char *dst = quoted;
-    *dst++ = '\'';
+    sb_append(sb, "'");
 
     for (const char *src = literal; *src; src++) {
         if (*src == '\'') {
-            *dst++ = '\'';
-            *dst++ = '\'';
+            sb_append(sb, "''");
         } else {
-            *dst++ = *src;
+            sb_append_char(sb, *src);
         }
     }
 
-    *dst++ = '\'';
-    *dst = '\0';
-
-    return quoted;
+    sb_append(sb, "'");
 }
 
 /* Format data type */

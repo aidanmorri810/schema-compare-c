@@ -4,19 +4,14 @@
 #include <string.h>
 
 /* Forward declarations for constraint helpers (defined in sql_generator_constraint.c) */
-char *generate_column_constraint(const ColumnConstraint *cc);
-char *generate_table_constraint(const TableConstraint *tc);
-char *generate_references_clause(const ColumnConstraint *cc);
+void generate_column_constraint(StringBuilder *sb, const ColumnConstraint *cc);
+void generate_table_constraint(StringBuilder *sb, const TableConstraint *tc);
+void generate_references_clause(StringBuilder *sb, const ColumnConstraint *cc);
 
 /* Internal function to generate CREATE TABLE SQL with option to skip foreign keys (used by sql_generator.c) */
-char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLGenOptions *opts, bool skip_foreign_keys) {
-    if (!stmt || !stmt->table_name) {
-        return NULL;
-    }
-
-    StringBuilder *sb = sb_create();
-    if (!sb) {
-        return NULL;
+void generate_create_table_sql_internal(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts, bool skip_foreign_keys) {
+    if (!sb || !stmt || !stmt->table_name) {
+        return;
     }
 
     if (opts->add_comments) {
@@ -40,9 +35,7 @@ char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLG
         sb_append(sb, "IF NOT EXISTS ");
     }
 
-    char *quoted_table = quote_identifier(stmt->table_name);
-    sb_append(sb, quoted_table);
-    free(quoted_table);
+    sb_append_identifier(sb, stmt->table_name);
 
     /* Handle different table variants */
     if (stmt->variant == CREATE_TABLE_REGULAR && stmt->table_def.regular.elements) {
@@ -69,9 +62,7 @@ char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLG
                 ColumnDef *col = &elem->elem.column;
 
                 /* Column name and type */
-                char *quoted_col = quote_identifier(col->column_name);
-                sb_append(sb, quoted_col);
-                free(quoted_col);
+                sb_append_identifier(sb, col->column_name);
 
                 sb_append(sb, " ");
                 sb_append(sb, col->data_type ? col->data_type : "text");
@@ -83,18 +74,10 @@ char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLG
                         continue;
                     }
                     sb_append(sb, " ");
-                    char *constraint_sql = generate_column_constraint(cc);
-                    if (constraint_sql) {
-                        sb_append(sb, constraint_sql);
-                        free(constraint_sql);
-                    }
+                    generate_column_constraint(sb, cc);
                 }
             } else if (elem->type == TABLE_ELEM_TABLE_CONSTRAINT) {
-                char *constraint_sql = generate_table_constraint(elem->elem.table_constraint);
-                if (constraint_sql) {
-                    sb_append(sb, constraint_sql);
-                    free(constraint_sql);
-                }
+                generate_table_constraint(sb, elem->elem.table_constraint);
             }
         }
 
@@ -108,9 +91,7 @@ char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLG
         sb_append(sb, " INHERITS (");
         for (int i = 0; i < stmt->table_def.regular.inherits_count; i++) {
             if (i > 0) sb_append(sb, ", ");
-            char *quoted = quote_identifier(stmt->table_def.regular.inherits[i]);
-            sb_append(sb, quoted);
-            free(quoted);
+            sb_append_identifier(sb, stmt->table_def.regular.inherits[i]);
         }
         sb_append(sb, ")");
     }
@@ -132,36 +113,22 @@ char *generate_create_table_sql_internal(const CreateTableStmt *stmt, const SQLG
     /* TABLESPACE */
     if (stmt->tablespace_name) {
         sb_append(sb, " TABLESPACE ");
-        char *quoted_ts = quote_identifier(stmt->tablespace_name);
-        sb_append(sb, quoted_ts);
-        free(quoted_ts);
+        sb_append_identifier(sb, stmt->tablespace_name);
     }
 
     sb_append(sb, ";\n");
-
-    char *result = sb_to_string(sb);
-    sb_free(sb);
-    return result;
 }
 
 /* Generate CREATE TABLE SQL */
-char *generate_create_table_sql(const CreateTableStmt *stmt, const SQLGenOptions *opts) {
-    return generate_create_table_sql_internal(stmt, opts, false);
+void generate_create_table_sql(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts) {
+    generate_create_table_sql_internal(sb, stmt, opts, false);
 }
 
 /* Extract and generate ALTER TABLE ADD CONSTRAINT statements for foreign keys (used by sql_generator.c) */
-char *generate_foreign_key_constraints(const CreateTableStmt *stmt, const SQLGenOptions *opts) {
-    if (!stmt || !stmt->table_name || stmt->variant != CREATE_TABLE_REGULAR) {
-        return NULL;
+void generate_foreign_key_constraints(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts) {
+    if (!sb || !stmt || !stmt->table_name || stmt->variant != CREATE_TABLE_REGULAR) {
+        return;
     }
-
-    StringBuilder *sb = sb_create();
-    if (!sb) {
-        return NULL;
-    }
-
-    char *quoted_table = quote_identifier(stmt->table_name);
-    bool has_fks = false;
 
     /* Iterate through table elements */
     for (TableElement *elem = stmt->table_def.regular.elements; elem; elem = elem->next) {
@@ -170,8 +137,6 @@ char *generate_foreign_key_constraints(const CreateTableStmt *stmt, const SQLGen
             ColumnDef *col = &elem->elem.column;
             for (ColumnConstraint *cc = col->constraints; cc; cc = cc->next) {
                 if (cc->type == CONSTRAINT_REFERENCES) {
-                    has_fks = true;
-
                     if (opts->add_comments) {
                         sb_append(sb, "-- Add foreign key constraint for column ");
                         sb_append(sb, col->column_name);
@@ -179,30 +144,22 @@ char *generate_foreign_key_constraints(const CreateTableStmt *stmt, const SQLGen
                     }
 
                     sb_append(sb, "ALTER TABLE ");
-                    sb_append(sb, quoted_table);
+                    sb_append_identifier(sb, stmt->table_name);
                     sb_append(sb, " ADD ");
 
                     /* Add constraint name if present */
                     if (cc->constraint_name) {
                         sb_append(sb, "CONSTRAINT ");
-                        char *quoted_name = quote_identifier(cc->constraint_name);
-                        sb_append(sb, quoted_name);
-                        free(quoted_name);
+                        sb_append_identifier(sb, cc->constraint_name);
                         sb_append(sb, " ");
                     }
 
                     sb_append(sb, "FOREIGN KEY (");
-                    char *quoted_col = quote_identifier(col->column_name);
-                    sb_append(sb, quoted_col);
-                    free(quoted_col);
+                    sb_append_identifier(sb, col->column_name);
                     sb_append(sb, ") ");
 
                     /* Generate references clause (without CONSTRAINT keyword) */
-                    char *ref_sql = generate_references_clause(cc);
-                    if (ref_sql) {
-                        sb_append(sb, ref_sql);
-                        free(ref_sql);
-                    }
+                    generate_references_clause(sb, cc);
 
                     sb_append(sb, ";\n");
                 }
@@ -211,49 +168,27 @@ char *generate_foreign_key_constraints(const CreateTableStmt *stmt, const SQLGen
             /* Check table constraints for foreign keys */
             TableConstraint *tc = elem->elem.table_constraint;
             if (tc && tc->type == TABLE_CONSTRAINT_FOREIGN_KEY) {
-                has_fks = true;
-
                 if (opts->add_comments) {
                     sb_append(sb, "-- Add foreign key table constraint\n");
                 }
 
                 sb_append(sb, "ALTER TABLE ");
-                sb_append(sb, quoted_table);
+                sb_append_identifier(sb, stmt->table_name);
                 sb_append(sb, " ADD ");
 
                 /* Generate full constraint SQL */
-                char *constraint_sql = generate_table_constraint(tc);
-                if (constraint_sql) {
-                    sb_append(sb, constraint_sql);
-                    free(constraint_sql);
-                }
+                generate_table_constraint(sb, tc);
 
                 sb_append(sb, ";\n");
             }
         }
     }
-
-    free(quoted_table);
-
-    if (!has_fks) {
-        sb_free(sb);
-        return NULL;
-    }
-
-    char *result = sb_to_string(sb);
-    sb_free(sb);
-    return result;
 }
 
 /* Generate DROP TABLE SQL */
-char *generate_drop_table_sql(const char *table_name, const SQLGenOptions *opts) {
-    if (!table_name) {
-        return NULL;
-    }
-
-    StringBuilder *sb = sb_create();
-    if (!sb) {
-        return NULL;
+void generate_drop_table_sql(StringBuilder *sb, const char *table_name, const SQLGenOptions *opts) {
+    if (!sb || !table_name) {
+        return;
     }
 
     if (opts->add_warnings) {
@@ -266,18 +201,10 @@ char *generate_drop_table_sql(const char *table_name, const SQLGenOptions *opts)
         sb_append(sb, "\n");
     }
 
-    char *quoted_table = quote_identifier(table_name);
-
     sb_append(sb, "DROP TABLE ");
     if (opts->use_if_exists) {
         sb_append(sb, "IF EXISTS ");
     }
-    sb_append(sb, quoted_table);
+    sb_append_identifier(sb, table_name);
     sb_append(sb, " CASCADE;\n");
-
-    free(quoted_table);
-
-    char *result = sb_to_string(sb);
-    sb_free(sb);
-    return result;
 }

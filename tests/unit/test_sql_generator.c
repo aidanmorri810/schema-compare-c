@@ -1,6 +1,7 @@
 #include "../test_framework.h"
 #include "sql_generator.h"
 #include "diff.h"
+#include "utils.h"
 #include <string.h>
 
 /* Test: SQL generation options default */
@@ -15,39 +16,54 @@ TEST_CASE(sql_generator, sql_gen_options_default) {
     TEST_PASS();
 }
 
-/* Test: Quote identifier */
+/* Test: Append identifier */
 TEST_CASE(sql_generator, quote_identifier) {
-    char *quoted = quote_identifier("select");
-    ASSERT_NOT_NULL(quoted);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    sb_append_identifier(sb, "select");
+    char *result = sb_to_string(sb);
+    ASSERT_NOT_NULL(result);
 
     /* Should be quoted (typically with double quotes in PostgreSQL) */
-    ASSERT_TRUE(strlen(quoted) > strlen("select"));
+    ASSERT_TRUE(strlen(result) > strlen("select"));
 
-    free(quoted);
+    free(result);
+    sb_free(sb);
     TEST_PASS();
 }
 
-/* Test: Quote identifier - normal name */
+/* Test: Append identifier - normal name */
 TEST_CASE(sql_generator, quote_identifier_normal) {
-    char *quoted = quote_identifier("users");
-    ASSERT_NOT_NULL(quoted);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    sb_append_identifier(sb, "users");
+    char *result = sb_to_string(sb);
+    ASSERT_NOT_NULL(result);
 
     /* Behavior may vary - could be quoted or not */
-    ASSERT_TRUE(strlen(quoted) > 0);
+    ASSERT_TRUE(strlen(result) > 0);
 
-    free(quoted);
+    free(result);
+    sb_free(sb);
     TEST_PASS();
 }
 
-/* Test: Quote literal */
+/* Test: Append literal */
 TEST_CASE(sql_generator, quote_literal) {
-    char *quoted = quote_literal("test value");
-    ASSERT_NOT_NULL(quoted);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    sb_append_literal(sb, "test value");
+    char *result = sb_to_string(sb);
+    ASSERT_NOT_NULL(result);
 
     /* Should be quoted with single quotes */
-    ASSERT_TRUE(strlen(quoted) > strlen("test value"));
+    ASSERT_TRUE(strlen(result) > strlen("test value"));
 
-    free(quoted);
+    free(result);
+    sb_free(sb);
     TEST_PASS();
 }
 
@@ -66,7 +82,11 @@ TEST_CASE(sql_generator, generate_drop_table_sql) {
     SQLGenOptions *opts = sql_gen_options_default();
     opts->use_if_exists = false;
 
-    char *sql = generate_drop_table_sql("old_table", opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_drop_table_sql(sb, "old_table", opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain DROP and TABLE */
@@ -74,6 +94,7 @@ TEST_CASE(sql_generator, generate_drop_table_sql) {
     ASSERT_TRUE(strstr(sql, "TABLE") != NULL || strstr(sql, "table") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     TEST_PASS();
 }
@@ -83,13 +104,18 @@ TEST_CASE(sql_generator, generate_drop_table_if_exists) {
     SQLGenOptions *opts = sql_gen_options_default();
     opts->use_if_exists = true;
 
-    char *sql = generate_drop_table_sql("old_table", opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_drop_table_sql(sb, "old_table", opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain IF EXISTS */
     ASSERT_TRUE(strstr(sql, "IF EXISTS") != NULL || strstr(sql, "if exists") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     TEST_PASS();
 }
@@ -98,7 +124,11 @@ TEST_CASE(sql_generator, generate_drop_table_if_exists) {
 TEST_CASE(sql_generator, generate_drop_column_sql) {
     SQLGenOptions *opts = sql_gen_options_default();
 
-    char *sql = generate_drop_column_sql("users", "old_field", opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_drop_column_sql(sb, "users", "old_field", opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain ALTER TABLE and DROP */
@@ -106,6 +136,7 @@ TEST_CASE(sql_generator, generate_drop_column_sql) {
     ASSERT_TRUE(strstr(sql, "DROP") != NULL || strstr(sql, "drop") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     TEST_PASS();
 }
@@ -118,7 +149,11 @@ TEST_CASE(sql_generator, generate_add_column_sql) {
 
     SQLGenOptions *opts = sql_gen_options_default();
 
-    char *sql = generate_add_column_sql("users", col, opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_add_column_sql(sb, "users", col, opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain ALTER TABLE and ADD */
@@ -126,6 +161,7 @@ TEST_CASE(sql_generator, generate_add_column_sql) {
     ASSERT_TRUE(strstr(sql, "ADD") != NULL || strstr(sql, "add") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     column_diff_free(col);
     TEST_PASS();
@@ -140,13 +176,18 @@ TEST_CASE(sql_generator, generate_alter_column_type_sql) {
 
     SQLGenOptions *opts = sql_gen_options_default();
 
-    char *sql = generate_alter_column_type_sql("users", col, opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_alter_column_type_sql(sb, "users", col, opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain ALTER and TYPE */
     ASSERT_TRUE(strstr(sql, "ALTER") != NULL || strstr(sql, "alter") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     column_diff_free(col);
     TEST_PASS();
@@ -161,13 +202,18 @@ TEST_CASE(sql_generator, generate_alter_column_nullable_sql) {
 
     SQLGenOptions *opts = sql_gen_options_default();
 
-    char *sql = generate_alter_column_nullable_sql("users", col, opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_alter_column_nullable_sql(sb, "users", col, opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain ALTER and either SET or DROP */
     ASSERT_TRUE(strstr(sql, "ALTER") != NULL || strstr(sql, "alter") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     column_diff_free(col);
     TEST_PASS();
@@ -182,13 +228,18 @@ TEST_CASE(sql_generator, generate_alter_column_default_sql) {
 
     SQLGenOptions *opts = sql_gen_options_default();
 
-    char *sql = generate_alter_column_default_sql("users", col, opts);
+    StringBuilder *sb = sb_create();
+    ASSERT_NOT_NULL(sb);
+
+    generate_alter_column_default_sql(sb, "users", col, opts);
+    char *sql = sb_to_string(sb);
     ASSERT_NOT_NULL(sql);
 
     /* Should contain ALTER and DEFAULT */
     ASSERT_TRUE(strstr(sql, "ALTER") != NULL || strstr(sql, "alter") != NULL);
 
     free(sql);
+    sb_free(sb);
     sql_gen_options_free(opts);
     column_diff_free(col);
     TEST_PASS();
