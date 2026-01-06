@@ -87,6 +87,7 @@ static const KeywordMap keywords[] = {
     {"partition", TOKEN_PARTITION},
     {"period", TOKEN_PERIOD},
     {"plain", TOKEN_PLAIN},
+    {"precision", TOKEN_PRECISION},
     {"preserve", TOKEN_PRESERVE},
     {"primary", TOKEN_PRIMARY},
     {"range", TOKEN_RANGE},

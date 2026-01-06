@@ -107,7 +107,16 @@ char *parse_data_type(Parser *parser) {
 
     /* Base type name */
     sb_append(sb, parser->current.lexeme);
+    char *base_type = str_to_lower(parser->current.lexeme);
     parser_advance(parser);
+
+    /* Check for multi-word type names like DOUBLE PRECISION */
+    if (base_type && strcmp(base_type, "double") == 0 && parser_check(parser, TOKEN_PRECISION)) {
+        sb_append(sb, " ");
+        sb_append(sb, parser->current.lexeme);
+        parser_advance(parser);
+    }
+    free(base_type);
 
     /* Check for schema-qualified type (schema.typename) */
     if (parser_match(parser, TOKEN_DOT)) {

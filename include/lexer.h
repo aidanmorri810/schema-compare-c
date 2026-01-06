@@ -77,6 +77,7 @@ typedef enum {
     TOKEN_EXTENDED,
     TOKEN_MAIN,
     TOKEN_COMPRESSION,
+    TOKEN_PRECISION,
 
     /* Keywords - Table options */
     TOKEN_INHERITS,

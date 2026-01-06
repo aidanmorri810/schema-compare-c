@@ -278,6 +278,28 @@ TEST_CASE(parser_columns, parse_column_uuid) {
     TEST_PASS();
 }
 
+/* Test: Parse DOUBLE PRECISION type */
+TEST_CASE(parser_columns, parse_column_double_precision) {
+    Parser *parser = parser_create("CREATE TABLE t (price DOUBLE PRECISION);");
+    ASSERT_NOT_NULL(parser);
+
+    CreateTableStmt *stmt = parser_parse_create_table(parser);
+    ASSERT_NOT_NULL(stmt);
+
+    /* Verify the column has the correct type */
+    TableElement *elem = stmt->table_def.regular.elements;
+    ASSERT_NOT_NULL(elem);
+    ASSERT_EQ(elem->type, TABLE_ELEM_COLUMN);
+
+    ColumnDef *col = &elem->elem.column;
+    ASSERT_STR_EQ(col->column_name, "price");
+    ASSERT_STR_EQ(col->data_type, "DOUBLE PRECISION");
+
+    parser_destroy(parser);
+    free_create_table_stmt(stmt);
+    TEST_PASS();
+}
+
 /* Test suite definition */
 static TestCase parser_columns_tests[] = {
     {"parse_column_int", test_parser_columns_parse_column_int, "parser_columns"},
@@ -301,6 +323,7 @@ static TestCase parser_columns_tests[] = {
     {"parse_column_date", test_parser_columns_parse_column_date, "parser_columns"},
     {"parse_column_jsonb", test_parser_columns_parse_column_jsonb, "parser_columns"},
     {"parse_column_uuid", test_parser_columns_parse_column_uuid, "parser_columns"},
+    {"parse_column_double_precision", test_parser_columns_parse_column_double_precision, "parser_columns"},
 };
 
 void run_parser_columns_tests(void) {
