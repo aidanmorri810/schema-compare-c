@@ -182,24 +182,24 @@ TEST_CASE(db_reader, test_db_read_schema) {
                       ");");
 
     /* Read entire schema */
-    int table_count = 0;
-    CreateTableStmt **tables = db_read_schema(conn, "public", &table_count, ctx);
+    Schema *schema = db_read_schema(conn, "public", ctx);
 
-    ASSERT_NOT_NULL(tables);
-    ASSERT_TRUE(table_count >= 2); /* At least our 2 test tables */
+    ASSERT_NOT_NULL(schema);
+    ASSERT_NOT_NULL(schema->tables);
+    ASSERT_TRUE(schema->table_count >= 2); /* At least our 2 test tables */
 
     /* Verify we can find our tables */
     bool found_simple = false;
     bool found_constraints = false;
 
-    for (int i = 0; i < table_count; i++) {
-        ASSERT_NOT_NULL(tables[i]);
-        ASSERT_NOT_NULL(tables[i]->table_name);
+    for (int i = 0; i < schema->table_count; i++) {
+        ASSERT_NOT_NULL(schema->tables[i]);
+        ASSERT_NOT_NULL(schema->tables[i]->table_name);
 
-        if (strcmp(tables[i]->table_name, "test_simple") == 0) {
+        if (strcmp(schema->tables[i]->table_name, "test_simple") == 0) {
             found_simple = true;
         }
-        if (strcmp(tables[i]->table_name, "test_constraints") == 0) {
+        if (strcmp(schema->tables[i]->table_name, "test_constraints") == 0) {
             found_constraints = true;
         }
     }

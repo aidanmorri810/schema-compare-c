@@ -549,53 +549,33 @@ AppContext *parse_command_line(int argc, char **argv) {
 }
 
 /* Load schemas from database */
-CreateTableStmt **load_from_database(DBConnection *conn, const char *schema,
-                                     int *table_count, MemoryContext *mem_ctx) {
-    IntrospectionOptions opts = {0};
-    opts.schemas = (char **)&schema;
-    opts.schema_count = 1;
-
-    return db_read_all_tables(conn, &opts, table_count, mem_ctx);
+Schema *load_from_database(DBConnection *conn, const char *schema_name,
+                           MemoryContext *mem_ctx) {
+    return db_read_schema(conn, schema_name, mem_ctx);
 }
 
 /* Load schemas from file */
-CreateTableStmt **load_from_file(const char *file_path, int *table_count,
-                                 MemoryContext *mem_ctx) {
-    (void)mem_ctx;
+Schema *load_from_file(const char *file_path, MemoryContext *mem_ctx) {
+    (void)mem_ctx; /* Unused - parser uses its own memory context */
 
     /* Read file content */
     char *source = read_file_to_string(file_path);
     if (!source) {
-        *table_count = 0;
         return NULL;
     }
 
     Parser *parser = parser_create(source);
     if (!parser) {
         free(source);
-        *table_count = 0;
         return NULL;
     }
 
-    CreateTableStmt *stmt = parser_parse_create_table(parser);
+    /* Parse all statements in the file */
+    Schema *schema = parse_all_statements(parser);
     parser_destroy(parser);
     free(source);
 
-    if (!stmt) {
-        *table_count = 0;
-        return NULL;
-    }
-
-    CreateTableStmt **result = malloc(sizeof(CreateTableStmt *));
-    if (!result) {
-        free_create_table_stmt(stmt);
-        *table_count = 0;
-        return NULL;
-    }
-
-    result[0] = stmt;
-    *table_count = 1;
-    return result;
+    return schema;
 }
 
 /* Recursively find all .sql files in directory */
@@ -681,36 +661,39 @@ static char **find_sql_files_recursive(const char *dir_path, int *count) {
 }
 
 /* Load schemas from directory */
-CreateTableStmt **load_from_directory(const char *dir_path, int *table_count,
-                                      MemoryContext *mem_ctx) {
-    (void)mem_ctx;
-
+Schema *load_from_directory(const char *dir_path, MemoryContext *mem_ctx) {
     /* Find all .sql files in directory tree */
     int file_count = 0;
     char **sql_files = find_sql_files_recursive(dir_path, &file_count);
 
     if (!sql_files || file_count == 0) {
-        *table_count = 0;
         if (sql_files) {
             free(sql_files);
         }
         return NULL;
     }
 
-    /* Allocate array for table statements */
-    CreateTableStmt **tables = malloc(sizeof(CreateTableStmt *) * file_count);
-    if (!tables) {
+    /* Create combined schema */
+    Schema *combined_schema = mem_alloc(mem_ctx, sizeof(Schema));
+    if (!combined_schema) {
         for (int i = 0; i < file_count; i++) {
             free(sql_files[i]);
         }
         free(sql_files);
-        *table_count = 0;
         return NULL;
     }
 
-    int parsed_count = 0;
+    /* Initialize combined schema */
+    combined_schema->types = NULL;
+    combined_schema->type_count = 0;
+    combined_schema->tables = NULL;
+    combined_schema->table_count = 0;
+    combined_schema->functions = NULL;
+    combined_schema->function_count = 0;
+    combined_schema->procedures = NULL;
+    combined_schema->procedure_count = 0;
 
-    /* Parse each SQL file */
+    /* Parse each SQL file and merge into combined schema */
     for (int i = 0; i < file_count; i++) {
         char *source = read_file_to_string(sql_files[i]);
         if (!source) {
@@ -727,38 +710,42 @@ CreateTableStmt **load_from_directory(const char *dir_path, int *table_count,
             continue;
         }
 
-        CreateTableStmt *stmt = parser_parse_create_table(parser);
+        /* Parse all statements in the file */
+        Schema *file_schema = parse_all_statements(parser);
         parser_destroy(parser);
         free(source);
 
-        if (!stmt) {
-            log_warn("Failed to parse CREATE TABLE from: %s", sql_files[i]);
+        if (!file_schema) {
+            log_warn("Failed to parse statements from: %s", sql_files[i]);
             free(sql_files[i]);
             continue;
         }
 
-        tables[parsed_count++] = stmt;
+        /* Merge tables from file schema into combined schema */
+        if (file_schema->table_count > 0) {
+            int new_count = combined_schema->table_count + file_schema->table_count;
+            CreateTableStmt **new_tables = mem_realloc(mem_ctx, combined_schema->tables,
+                                                        new_count * sizeof(CreateTableStmt *));
+            if (new_tables) {
+                combined_schema->tables = new_tables;
+                for (int j = 0; j < file_schema->table_count; j++) {
+                    combined_schema->tables[combined_schema->table_count++] = file_schema->tables[j];
+                }
+            }
+        }
+
+        /* Future: Merge other statement types (functions, types, procedures) */
+
         free(sql_files[i]);
     }
 
     free(sql_files);
 
-    if (parsed_count == 0) {
-        free(tables);
-        *table_count = 0;
+    if (combined_schema->table_count == 0) {
         return NULL;
     }
 
-    /* Resize array to actual count if needed */
-    if (parsed_count < file_count) {
-        CreateTableStmt **resized = realloc(tables, sizeof(CreateTableStmt *) * parsed_count);
-        if (resized) {
-            tables = resized;
-        }
-    }
-
-    *table_count = parsed_count;
-    return tables;
+    return combined_schema;
 }
 
 /* Generate migration filename for a target database */
@@ -805,8 +792,7 @@ int main(int argc, char **argv) {
     }
 
     /* Load source schema */
-    int source_count = 0;
-    CreateTableStmt **source_tables = NULL;
+    Schema *source_schema = NULL;
     DBConnection *source_conn = NULL;
 
     if (ctx->source->type == SOURCE_TYPE_DATABASE) {
@@ -827,11 +813,11 @@ int main(int argc, char **argv) {
 
         const char *schema = ctx->schema_name_override ? ctx->schema_name_override :
                             (ctx->source->schema_name ? ctx->source->schema_name : "public");
-        source_tables = load_from_database(source_conn, schema, &source_count, NULL);
-        if (source_tables) {
-            log_info("Loaded %d tables from source database", source_count);
+        source_schema = load_from_database(source_conn, schema, NULL);
+        if (source_schema) {
+            log_info("Loaded %d tables from source database", source_schema->table_count);
         } else {
-            log_error("Failed to load tables from source database");
+            log_error("Failed to load schema from source database");
             db_disconnect(source_conn);
             app_context_free(ctx);
             log_shutdown();
@@ -839,25 +825,25 @@ int main(int argc, char **argv) {
         }
     } else if (ctx->source->type == SOURCE_TYPE_DIRECTORY) {
         log_info("Loading source from directory: %s", ctx->source->source.directory_path);
-        source_tables = load_from_directory(ctx->source->source.directory_path, &source_count, NULL);
-        if (source_tables) {
-            log_info("Loaded %d tables from source directory", source_count);
+        source_schema = load_from_directory(ctx->source->source.directory_path, NULL);
+        if (source_schema) {
+            log_info("Loaded %d tables from source directory", source_schema->table_count);
         } else {
-            log_error("Failed to load tables from source directory");
+            log_error("Failed to load schema from source directory");
             app_context_free(ctx);
             log_shutdown();
             return 1;
         }
     } else if (ctx->source->type == SOURCE_TYPE_FILE) {
         log_info("Loading source from file: %s", ctx->source->source.file_path);
-        source_tables = load_from_file(ctx->source->source.file_path, &source_count, NULL);
-        if (!source_tables) {
-            log_error("Failed to load tables from source file");
+        source_schema = load_from_file(ctx->source->source.file_path, NULL);
+        if (!source_schema) {
+            log_error("Failed to load schema from source file");
             app_context_free(ctx);
             log_shutdown();
             return 1;
         }
-        log_info("Loaded %d tables from source file", source_count);
+        log_info("Loaded %d tables from source file", source_schema->table_count);
     }
 
     int result = 0;
@@ -871,8 +857,7 @@ int main(int argc, char **argv) {
                target_idx + 1, ctx->target_count, target->database_name);
 
         /* Load target database */
-        int target_count = 0;
-        CreateTableStmt **target_tables = NULL;
+        Schema *target_schema = NULL;
         DBConnection *target_conn = NULL;
 
         log_info("Connecting to target database: %s@%s:%s/%s",
@@ -895,15 +880,15 @@ int main(int argc, char **argv) {
 
         const char *schema = ctx->schema_name_override ? ctx->schema_name_override :
                             (target->schema_name ? target->schema_name : "public");
-        target_tables = load_from_database(target_conn, schema, &target_count, NULL);
-        if (!target_tables) {
-            log_error("Failed to load tables from target database #%d", target_idx + 1);
+        target_schema = load_from_database(target_conn, schema, NULL);
+        if (!target_schema) {
+            log_error("Failed to load schema from target database #%d", target_idx + 1);
             db_disconnect(target_conn);
             result = 1;
             continue;
         }
 
-        log_info("Loaded %d tables from target database", target_count);
+        log_info("Loaded %d tables from target database", target_schema->table_count);
 
         /* Compare schemas */
         log_info("Comparing schemas...");
@@ -911,16 +896,11 @@ int main(int argc, char **argv) {
         /* This makes the comparison logic work correctly: */
         /* - Tables in 'target' (desired) but not in 'source' (current) = ADDED */
         /* - Tables in 'source' (current) but not in 'target' (desired) = REMOVED */
-        SchemaDiff *diff = compare_schemas(target_tables, target_count,
-                                          source_tables, source_count,
+        SchemaDiff *diff = compare_schemas(target_schema, source_schema,
                                           ctx->compare_opts, NULL);
 
         if (!diff) {
             log_error("Failed to compare schemas for target #%d", target_idx + 1);
-            for (int i = 0; i < target_count; i++) {
-                free_create_table_stmt(target_tables[i]);
-            }
-            free(target_tables);
             db_disconnect(target_conn);
             result = 1;
             continue;
@@ -936,10 +916,6 @@ int main(int argc, char **argv) {
             if (!migration) {
                 log_error("Failed to generate SQL migration for target #%d", target_idx + 1);
                 schema_diff_free(diff);
-                for (int i = 0; i < target_count; i++) {
-                    free_create_table_stmt(target_tables[i]);
-                }
-                free(target_tables);
                 db_disconnect(target_conn);
                 result = 1;
                 continue;
@@ -956,10 +932,6 @@ int main(int argc, char **argv) {
                 log_error("Failed to generate output filename for target #%d", target_idx + 1);
                 sql_migration_free(migration);
                 schema_diff_free(diff);
-                for (int i = 0; i < target_count; i++) {
-                    free_create_table_stmt(target_tables[i]);
-                }
-                free(target_tables);
                 db_disconnect(target_conn);
                 result = 1;
                 continue;
@@ -1007,16 +979,12 @@ int main(int argc, char **argv) {
         schema_diff_free(diff);
 
         /* Cleanup target resources */
-        for (int i = 0; i < target_count; i++) {
-            free_create_table_stmt(target_tables[i]);
-        }
-        free(target_tables);
         db_disconnect(target_conn);
     }
 
     /* Print summary */
     printf("\n=== Summary ===\n");
-    printf("Source: %d tables loaded\n", source_count);
+    printf("Source: %d tables loaded\n", source_schema->table_count);
     printf("Targets processed: %d/%d\n", successful_migrations, ctx->target_count);
     if (successful_migrations < ctx->target_count) {
         printf("⚠ Some targets failed - check logs above\n");
@@ -1025,13 +993,6 @@ int main(int argc, char **argv) {
     /* Cleanup source resources */
     if (source_conn) {
         db_disconnect(source_conn);
-    }
-
-    if (source_tables) {
-        for (int i = 0; i < source_count; i++) {
-            free_create_table_stmt(source_tables[i]);
-        }
-        free(source_tables);
     }
 
     app_context_free(ctx);

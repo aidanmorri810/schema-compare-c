@@ -207,9 +207,13 @@ TEST_CASE(workflow_integration, multi_table_comparison) {
         CreateTableStmt *tables1[] = {actor, language};
         CreateTableStmt *tables2[] = {actor, language};
 
+        /* Create Schema structures */
+        Schema schema1 = { .tables = tables1, .table_count = 2, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+        Schema schema2 = { .tables = tables2, .table_count = 2, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+
         /* Compare schemas */
         CompareOptions *opts = compare_options_default();
-        SchemaDiff *diff = compare_schemas(tables1, 2, tables2, 2, opts, ctx);
+        SchemaDiff *diff = compare_schemas(&schema1, &schema2, opts, ctx);
 
         if (diff) {
             /* Same tables should show no changes */

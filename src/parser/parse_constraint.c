@@ -4,11 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Forward declarations */
-static bool parse_constraint_attributes(Parser *parser, ColumnConstraint *constraint);
-static SequenceOptions *parse_sequence_options(Parser *parser);
-static IndexParameters *parse_index_parameters(Parser *parser);
-
 /* Parse column constraint */
 ColumnConstraint *parse_column_constraint(Parser *parser) {
     ColumnConstraint *constraint = column_constraint_alloc(parser->memory_ctx);
@@ -622,7 +617,7 @@ TableConstraint *parse_table_constraint(Parser *parser) {
 }
 
 /* Parse constraint attributes */
-static bool parse_constraint_attributes(Parser *parser, ColumnConstraint *constraint) {
+bool parse_constraint_attributes(Parser *parser, ColumnConstraint *constraint) {
     /* Parse DEFERRABLE/NOT DEFERRABLE */
     if (parser_match(parser, TOKEN_DEFERRABLE)) {
         constraint->has_deferrable = true;
@@ -735,7 +730,7 @@ Expression *parse_expression(Parser *parser) {
 }
 
 /* Parse sequence options for GENERATED IDENTITY constraints */
-static SequenceOptions *parse_sequence_options(Parser *parser) {
+SequenceOptions *parse_sequence_options(Parser *parser) {
     SequenceOptions *opts = mem_calloc(parser->memory_ctx, 1, sizeof(SequenceOptions));
     if (!opts) {
         parser_error(parser, "Out of memory");
@@ -902,7 +897,7 @@ StorageParameterList *parse_with_options(Parser *parser) {
 }
 
 /* Parse index parameters (USING, WITH, TABLESPACE) */
-static IndexParameters *parse_index_parameters(Parser *parser) {
+IndexParameters *parse_index_parameters(Parser *parser) {
     IndexParameters *params = NULL;
     StorageParameterList *with_opts = NULL;
     char *tablespace = NULL;

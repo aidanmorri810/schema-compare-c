@@ -71,8 +71,30 @@ TEST_CASE(compare_schema, table_added_single) {
     ASSERT_NOT_NULL(source_tables);
     ASSERT_NOT_NULL(target_tables);
 
+    Schema source_schema = {
+        .tables = source_tables,
+        .table_count = 2,
+        .types = NULL,
+        .type_count = 0,
+        .functions = NULL,
+        .function_count = 0,
+        .procedures = NULL,
+        .procedure_count = 0
+    };
+
+    Schema target_schema = {
+        .tables = target_tables,
+        .table_count = 3,
+        .types = NULL,
+        .type_count = 0,
+        .functions = NULL,
+        .function_count = 0,
+        .procedures = NULL,
+        .procedure_count = 0
+    };
+
     CompareOptions *opts = compare_options_default();
-    SchemaDiff *diff = compare_schemas(source_tables, 2, target_tables, 3, opts, ctx);
+    SchemaDiff *diff = compare_schemas(&source_schema, &target_schema, opts, ctx);
 
     /* Validate: One table added */
     ASSERT_NOT_NULL(diff);
@@ -108,8 +130,11 @@ TEST_CASE(compare_schema, table_added_multiple) {
     ASSERT_NOT_NULL(source_tables);
     ASSERT_NOT_NULL(target_tables);
 
+    Schema source_schema = { .tables = source_tables, .table_count = 2, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+    Schema target_schema = { .tables = target_tables, .table_count = 4, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+
     CompareOptions *opts = compare_options_default();
-    SchemaDiff *diff = compare_schemas(source_tables, 2, target_tables, 4, opts, ctx);
+    SchemaDiff *diff = compare_schemas(&source_schema, &target_schema, opts, ctx);
 
     /* Validate: Two tables added */
     ASSERT_NOT_NULL(diff);
@@ -144,8 +169,11 @@ TEST_CASE(compare_schema, table_removed_single) {
     ASSERT_NOT_NULL(source_tables);
     ASSERT_NOT_NULL(target_tables);
 
+    Schema source_schema = { .tables = source_tables, .table_count = 3, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+    Schema target_schema = { .tables = target_tables, .table_count = 2, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+
     CompareOptions *opts = compare_options_default();
-    SchemaDiff *diff = compare_schemas(source_tables, 3, target_tables, 2, opts, ctx);
+    SchemaDiff *diff = compare_schemas(&source_schema, &target_schema, opts, ctx);
 
     /* Validate: One table removed */
     ASSERT_NOT_NULL(diff);
@@ -179,8 +207,11 @@ TEST_CASE(compare_schema, mixed_operations) {
     ASSERT_NOT_NULL(source_tables);
     ASSERT_NOT_NULL(target_tables);
 
+    Schema source_schema = { .tables = source_tables, .table_count = 2, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+    Schema target_schema = { .tables = target_tables, .table_count = 2, .types = NULL, .type_count = 0, .functions = NULL, .function_count = 0, .procedures = NULL, .procedure_count = 0 };
+
     CompareOptions *opts = compare_options_default();
-    SchemaDiff *diff = compare_schemas(source_tables, 2, target_tables, 2, opts, ctx);
+    SchemaDiff *diff = compare_schemas(&source_schema, &target_schema, opts, ctx);
 
     /* Validate: added employees, removed products, modified users */
     ASSERT_NOT_NULL(diff);

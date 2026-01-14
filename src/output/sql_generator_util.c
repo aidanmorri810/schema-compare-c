@@ -37,6 +37,41 @@ void sql_migration_free(SQLMigration *migration) {
     free(migration);
 }
 
+/* Check if identifier is a PostgreSQL reserved keyword */
+static bool is_reserved_keyword(const char *identifier) {
+    /* Common PostgreSQL reserved keywords that need quoting */
+    static const char *keywords[] = {
+        "select", "from", "where", "insert", "update", "delete",
+        "create", "drop", "alter", "table", "index", "view",
+        "user", "group", "order", "by", "limit", "offset",
+        "union", "join", "left", "right", "inner", "outer",
+        "on", "as", "and", "or", "not", "null", "true", "false",
+        "default", "primary", "foreign", "key", "references",
+        "constraint", "unique", "check", "exists", "like",
+        NULL
+    };
+
+    char lower[256];
+    size_t len = strlen(identifier);
+    if (len >= sizeof(lower)) {
+        return false;
+    }
+
+    /* Convert to lowercase for comparison */
+    for (size_t i = 0; i < len; i++) {
+        lower[i] = tolower(identifier[i]);
+    }
+    lower[len] = '\0';
+
+    for (int i = 0; keywords[i] != NULL; i++) {
+        if (strcmp(lower, keywords[i]) == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 /* Append quoted SQL identifier to string builder */
 void sb_append_identifier(StringBuilder *sb, const char *identifier) {
     if (!sb || !identifier) {
@@ -46,11 +81,18 @@ void sb_append_identifier(StringBuilder *sb, const char *identifier) {
     /* Check if identifier needs quoting */
     bool needs_quote = false;
 
+    /* Check if it's a reserved keyword */
+    if (is_reserved_keyword(identifier)) {
+        needs_quote = true;
+    }
+
     /* Check if it contains special characters (except underscore) */
-    for (const char *p = identifier; *p; p++) {
-        if (!isalnum(*p) && *p != '_') {
-            needs_quote = true;
-            break;
+    if (!needs_quote) {
+        for (const char *p = identifier; *p; p++) {
+            if (!isalnum(*p) && *p != '_') {
+                needs_quote = true;
+                break;
+            }
         }
     }
 

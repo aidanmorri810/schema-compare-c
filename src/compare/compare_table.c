@@ -1,13 +1,148 @@
 #include "compare.h"
 #include "utils.h"
-#include <stdlib.h>
 #include <string.h>
 
-/* Forward declarations */
-void compare_columns(const CreateTableStmt *source, const CreateTableStmt *target,
-                    TableDiff *result, const CompareOptions *opts, MemoryContext *mem_ctx);
-void compare_constraints(const CreateTableStmt *source, const CreateTableStmt *target,
-                        TableDiff *result, const CompareOptions *opts, MemoryContext *mem_ctx);
+/* Compare all tables in a schema */
+void compare_all_tables(CreateTableStmt **source_tables, int source_count,
+                          CreateTableStmt **target_tables, int target_count,
+                          SchemaDiff *result,
+                          const CompareOptions *opts,
+                          MemoryContext *mem_ctx) {
+    if (!source_tables || !target_tables || !result) {
+        return;
+    }
+
+    /* Build hash tables for O(1) lookup */
+    HashTable *source_ht = hash_table_create(source_count * 2);
+    HashTable *target_ht = hash_table_create(target_count * 2);
+
+    if (!source_ht || !target_ht) {
+        hash_table_destroy(source_ht);
+        hash_table_destroy(target_ht);
+        return;
+    }
+
+    /* Populate source hash table */
+    for (int i = 0; i < source_count; i++) {
+        if (source_tables[i] && source_tables[i]->table_name) {
+            hash_table_insert(source_ht, source_tables[i]->table_name, source_tables[i]);
+        }
+    }
+
+    /* Populate target hash table */
+    for (int i = 0; i < target_count; i++) {
+        if (target_tables[i] && target_tables[i]->table_name) {
+            hash_table_insert(target_ht, target_tables[i]->table_name, target_tables[i]);
+        }
+    }
+
+    TableDiff *last_diff = result->table_diffs;
+    /* Find the end of existing table_diffs list */
+    while (last_diff && last_diff->next) {
+        last_diff = last_diff->next;
+    }
+
+    /* Find added and modified tables (tables in target but not in source, or different) */
+    for (int i = 0; i < target_count; i++) {
+        CreateTableStmt *target = target_tables[i];
+        if (!target || !target->table_name) {
+            continue;
+        }
+
+        if (!should_compare_table(target->table_name, opts)) {
+            continue;
+        }
+
+        CreateTableStmt *source = hash_table_get(source_ht, target->table_name);
+
+        if (!source) {
+            /* Table added */
+            TableDiff *diff = table_diff_create(target->table_name);
+            if (diff) {
+                diff->table_added = true;
+                diff->target_table = target;  /* Store target table definition */
+                diff->source_table = NULL;
+                result->tables_added++;
+
+                /* Link into list */
+                if (last_diff) {
+                    last_diff->next = diff;
+                } else {
+                    result->table_diffs = diff;
+                }
+                last_diff = diff;
+            }
+        } else {
+            /* Table exists in both - compare details */
+            TableDiff *diff = compare_tables(source, target, opts, mem_ctx);
+            if (diff && diff->table_modified) {
+                result->tables_modified++;
+                result->total_diffs += diff->diff_count;
+
+                /* Link into list */
+                if (last_diff) {
+                    last_diff->next = diff;
+                } else {
+                    result->table_diffs = diff;
+                }
+                last_diff = diff;
+            }
+        }
+    }
+
+    /* Find removed tables (tables in source but not in target) */
+    for (int i = 0; i < source_count; i++) {
+        CreateTableStmt *source = source_tables[i];
+        if (!source || !source->table_name) {
+            continue;
+        }
+
+        if (!should_compare_table(source->table_name, opts)) {
+            continue;
+        }
+
+        CreateTableStmt *target = hash_table_get(target_ht, source->table_name);
+
+        if (!target) {
+            /* Table removed */
+            TableDiff *diff = table_diff_create(source->table_name);
+            if (diff) {
+                diff->table_removed = true;
+                diff->source_table = source;  /* Store source table definition */
+                diff->target_table = NULL;
+                result->tables_removed++;
+
+                /* Link into list */
+                if (last_diff) {
+                    last_diff->next = diff;
+                } else {
+                    result->table_diffs = diff;
+                }
+                last_diff = diff;
+            }
+        }
+    }
+
+    /* Calculate severity counts */
+    for (TableDiff *td = result->table_diffs; td; td = td->next) {
+        for (Diff *d = td->diffs; d; d = d->next) {
+            switch (d->severity) {
+                case SEVERITY_CRITICAL:
+                    result->critical_count++;
+                    break;
+                case SEVERITY_WARNING:
+                    result->warning_count++;
+                    break;
+                case SEVERITY_INFO:
+                    result->info_count++;
+                    break;
+            }
+        }
+    }
+
+    hash_table_destroy(source_ht);
+    hash_table_destroy(target_ht);
+}
 
 /* Compare two tables */
 TableDiff *compare_tables(const CreateTableStmt *source, const CreateTableStmt *target,

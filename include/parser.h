@@ -1,6 +1,7 @@
 #ifndef PARSER_H
 #define PARSER_H
 
+#include "pg_schema.h"
 #include "pg_create_table.h"
 #include "lexer.h"
 #include "sc_memory.h"
@@ -25,22 +26,19 @@ typedef struct {
     MemoryContext *memory_ctx; /* for allocations */
 } Parser;
 
-/* Main parser API */
-Parser *parser_create(const char *source);
-void parser_destroy(Parser *parser);
-CreateTableStmt *parser_parse_create_table(Parser *parser);
-ParseError *parser_get_errors(Parser *parser);
-void parser_free_errors(ParseError *errors);
-
-/* Parse result - can hold either success or errors */
 typedef struct {
     CreateTableStmt *stmt;
     ParseError *errors;
     bool success;
 } ParseResult;
 
-ParseResult *parse_ddl_file(const char *filename);
-ParseResult *parse_ddl_string(const char *ddl);
+/*                 */
+/* Main parser API */
+/*                 */
+Parser *parser_create(const char *source);
+void parser_destroy(Parser *parser);
+ParseError *parser_get_errors(Parser *parser);
+void parser_free_errors(ParseError *errors);
 void parse_result_free(ParseResult *result);
 
 /* Token navigation functions */
@@ -52,15 +50,37 @@ void parser_error(Parser *parser, const char *format, ...);
 void parser_synchronize(Parser *parser);
 
 /* Recursive descent parsing functions */
-TableElement *parse_table_element(Parser *parser);
-ColumnDef *parse_column_def(Parser *parser);
-TableConstraint *parse_table_constraint(Parser *parser);
-ColumnConstraint *parse_column_constraint(Parser *parser);
 Expression *parse_expression(Parser *parser);
-char *parse_data_type(Parser *parser);
+StorageParameterList *parse_with_options(Parser *parser);
+
+/*                       */
+/* SQL Statement Handlers */
+/*                       */
+
+/* parse_schema.c */
+Schema *parse_all_statements(Parser *parser);
+void parser_parse_statement(Parser *parser, Schema *schema);
+
+/* parse_table.c */
+CreateTableStmt *parser_parse_create_table(Parser *parser);
+TableElement *parse_table_element(Parser *parser);
+TableConstraint *parse_table_constraint(Parser *parser);
+TableElement *parse_table_element_list(Parser *parser);
+LikeClause *parse_like_clause(Parser *parser);
+
+/* parse_partition.c */
 PartitionByClause *parse_partition_by(Parser *parser);
 PartitionBoundSpec *parse_partition_bound_spec(Parser *parser);
-StorageParameterList *parse_with_options(Parser *parser);
-LikeClause *parse_like_clause(Parser *parser);
+
+/* parse_constrain.c */
+ColumnConstraint *parse_column_constraint(Parser *parser);
+SequenceOptions *parse_sequence_options(Parser *parser);
+IndexParameters *parse_index_parameters(Parser *parser);
+bool parse_constraint_attributes(Parser *parser, ColumnConstraint *constraint);
+
+/* parse_column.c */
+ColumnDef *parse_column_def(Parser *parser);
+char *parse_data_type(Parser *parser);
+
 
 #endif /* PARSER_H */

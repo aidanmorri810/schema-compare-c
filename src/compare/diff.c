@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+// TODO: Convert this to using a memory context 
+
 /* Create a new diff */
 Diff *diff_create(DiffType type, DiffSeverity severity,
                   const char *table_name, const char *element_name) {

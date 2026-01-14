@@ -139,9 +139,32 @@ TEST_CASE(compare_integration, compare_multiple_tables) {
     /* Should have parsed at least 2 tables */
     ASSERT_TRUE(count >= 2);
 
+    /* Create Schema structures */
+    Schema schema1 = {
+        .tables = tables1,
+        .table_count = count,
+        .types = NULL,
+        .type_count = 0,
+        .functions = NULL,
+        .function_count = 0,
+        .procedures = NULL,
+        .procedure_count = 0
+    };
+
+    Schema schema2 = {
+        .tables = tables2,
+        .table_count = count,
+        .types = NULL,
+        .type_count = 0,
+        .functions = NULL,
+        .function_count = 0,
+        .procedures = NULL,
+        .procedure_count = 0
+    };
+
     /* Compare schemas */
     CompareOptions *opts = compare_options_default();
-    SchemaDiff *diff = compare_schemas(tables1, count, tables2, count, opts, ctx);
+    SchemaDiff *diff = compare_schemas(&schema1, &schema2, opts, ctx);
 
     /* Identical schemas should show no differences */
     if (diff) {

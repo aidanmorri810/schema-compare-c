@@ -164,7 +164,11 @@ TEST_CASE(compare, compare_schemas_empty) {
 
     CompareOptions *opts = compare_options_default();
 
-    SchemaDiff *diff = compare_schemas(NULL, 0, NULL, 0, opts, ctx);
+    /* Create empty schemas */
+    Schema source = {0};
+    Schema target = {0};
+
+    SchemaDiff *diff = compare_schemas(&source, &target, opts, ctx);
 
     /* Comparing NULL/empty arrays may return NULL or an empty diff */
     if (diff) {

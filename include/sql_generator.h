@@ -42,6 +42,11 @@ bool write_migration_to_file(const SQLMigration *migration, const char *filename
 void generate_create_table_sql(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts);
 void generate_drop_table_sql(StringBuilder *sb, const char *table_name, const SQLGenOptions *opts);
 
+/* Generate migration SQL for all table diffs - returns statement count */
+int generate_table_migration_sql(StringBuilder *sb, const SchemaDiff *diff,
+                                  const SQLGenOptions *opts,
+                                  bool *has_destructive);
+
 /* ========== COLUMN OPERATIONS (sql_generator_column.c) ========== */
 
 void generate_add_column_sql(StringBuilder *sb, const char *table_name, const ColumnDiff *col,

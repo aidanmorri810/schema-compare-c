@@ -1,10 +1,14 @@
 #ifndef COMPARE_H
 #define COMPARE_H
 
+#include "pg_schema.h"
 #include "pg_create_table.h"
 #include "diff.h"
 #include "sc_memory.h"
 #include <stdbool.h>
+
+/* Forward declarations */
+typedef struct Schema Schema;
 
 /* Comparison options */
 typedef struct CompareOptions {
@@ -34,11 +38,17 @@ void compare_options_free(CompareOptions *opts);
 
 /* Main comparison functions */
 
-/* Compare two schemas (arrays of CreateTableStmt) */
-SchemaDiff *compare_schemas(CreateTableStmt **source_tables, int source_count,
-                           CreateTableStmt **target_tables, int target_count,
+/* Compare two schemas */
+SchemaDiff *compare_schemas(const Schema *source, const Schema *target,
                            const CompareOptions *opts,
                            MemoryContext *mem_ctx);
+
+/* Compare table schemas - helper for compare_schemas() */
+void compare_all_tables(CreateTableStmt **source_tables, int source_count,
+                          CreateTableStmt **target_tables, int target_count,
+                          SchemaDiff *result,
+                          const CompareOptions *opts,
+                          MemoryContext *mem_ctx);
 
 /* Compare two individual tables */
 TableDiff *compare_tables(const CreateTableStmt *source, const CreateTableStmt *target,

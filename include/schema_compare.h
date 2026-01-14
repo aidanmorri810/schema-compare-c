@@ -13,6 +13,13 @@
 /* Application version */
 #define SCHEMA_COMPARE_VERSION "0.1.0"
 
+/* Forward declarations */
+typedef struct CreateTypeStmt CreateTypeStmt;
+typedef struct CreateFunctionStmt CreateFunctionStmt;
+typedef struct CreateProcedureStmt CreateProcedureStmt;
+
+
+
 /* Source type for comparison */
 typedef enum {
     SOURCE_TYPE_DATABASE,    /* PostgreSQL database */
@@ -72,11 +79,9 @@ void print_version(void);
 int compare_and_report(SchemaSource *source, SchemaSource *target, AppContext *ctx);
 
 /* Load schemas from sources */
-CreateTableStmt **load_from_database(DBConnection *conn, const char *schema,
-                                     int *table_count, MemoryContext *mem_ctx);
-CreateTableStmt **load_from_file(const char *file_path, int *table_count,
-                                 MemoryContext *mem_ctx);
-CreateTableStmt **load_from_directory(const char *dir_path, int *table_count,
-                                      MemoryContext *mem_ctx);
+Schema *load_from_database(DBConnection *conn, const char *schema_name,
+                           MemoryContext *mem_ctx);
+Schema *load_from_file(const char *file_path, MemoryContext *mem_ctx);
+Schema *load_from_directory(const char *dir_path, MemoryContext *mem_ctx);
 
 #endif /* SCHEMA_COMPARE_H */

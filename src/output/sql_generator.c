@@ -2,9 +2,10 @@
 #include "utils.h"
 #include <stdlib.h>
 
-/* Forward declarations for functions defined in separate modules */
-void generate_create_table_sql_internal(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts, bool skip_foreign_keys);
-void generate_foreign_key_constraints(StringBuilder *sb, const CreateTableStmt *stmt, const SQLGenOptions *opts);
+/* Forward declarations for table migration functions (defined in sql_generator_table.c) */
+int generate_table_migration_sql(StringBuilder *sb, const SchemaDiff *diff,
+                                  const SQLGenOptions *opts,
+                                  bool *has_destructive);
 
 /* Generate migration SQL from diff */
 SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions *opts) {
@@ -40,140 +41,14 @@ SQLMigration *generate_migration_sql(const SchemaDiff *diff, const SQLGenOptions
         sb_append(sb, "BEGIN;\n\n");
     }
 
-    /* First pass: handle removed tables */
-    for (TableDiff *td = diff->table_diffs; td; td = td->next) {
-        if (td->table_removed) {
-            generate_drop_table_sql(sb, td->table_name, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-            migration->has_destructive_changes = true;
-        }
+    /* Generate table migrations - delegate to table-specific module */
+    bool has_destructive = false;
+    stmt_count += generate_table_migration_sql(sb, diff, opts, &has_destructive);
+    if (has_destructive) {
+        migration->has_destructive_changes = true;
     }
 
-    /* Second pass: create added tables WITHOUT foreign keys */
-    if (opts->add_comments) {
-        sb_append(sb, "-- Create new tables (foreign keys will be added after)\n\n");
-    }
-
-    for (TableDiff *td = diff->table_diffs; td; td = td->next) {
-        if (td->table_added && td->target_table) {
-            /* Always skip foreign keys during CREATE TABLE */
-            generate_create_table_sql_internal(sb, td->target_table, opts, true);
-            sb_append(sb, "\n");
-            stmt_count++;
-        } else if (td->table_added) {
-            /* Fallback if table definition not available */
-            if (opts->add_comments) {
-                sb_append_fmt(sb, "-- TODO: CREATE TABLE %s\n", td->table_name);
-                sb_append(sb, "-- (Table definition not available in diff)\n\n");
-            }
-        }
-    }
-
-    /* Third pass: handle modified tables (column and constraint changes) */
-    for (TableDiff *td = diff->table_diffs; td; td = td->next) {
-        if (td->table_added || td->table_removed) {
-            continue;
-        }
-
-        /* Handle column changes */
-        for (ColumnDiff *cd = td->columns_removed; cd; cd = cd->next) {
-            generate_drop_column_sql(sb, td->table_name, cd->column_name, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-            migration->has_destructive_changes = true;
-        }
-
-        for (ColumnDiff *cd = td->columns_added; cd; cd = cd->next) {
-            generate_add_column_sql(sb, td->table_name, cd, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-        }
-
-        for (ColumnDiff *cd = td->columns_modified; cd; cd = cd->next) {
-            /* 1. Type changes first */
-            if (cd->type_changed) {
-                generate_alter_column_type_sql(sb, td->table_name, cd, opts);
-                sb_append(sb, "\n");
-                stmt_count++;
-            }
-
-            /* 2. Default changes before nullable - important when changing NULL -> NOT NULL */
-            if (cd->default_changed) {
-                generate_alter_column_default_sql(sb, td->table_name, cd, opts);
-                sb_append(sb, "\n");
-                stmt_count++;
-            }
-
-            /* 3. If changing from NULL to NOT NULL, add a warning about backfilling */
-            if (cd->nullable_changed && cd->old_nullable && !cd->new_nullable) {
-                if (opts->add_warnings) {
-                    sb_append(sb, "-- WARNING: Setting NOT NULL on nullable column\n");
-                    sb_append(sb, "-- You may need to backfill NULL values first:\n");
-                    sb_append(sb, "-- UPDATE ");
-                    sb_append_identifier(sb, td->table_name);
-                    sb_append(sb, " SET ");
-                    sb_append_identifier(sb, cd->column_name);
-                    sb_append(sb, " = ");
-                    if (cd->new_default) {
-                        sb_append(sb, cd->new_default);
-                    } else {
-                        sb_append(sb, "<default_value>");
-                    }
-                    sb_append(sb, " WHERE ");
-                    sb_append_identifier(sb, cd->column_name);
-                    sb_append(sb, " IS NULL;\n");
-                }
-            }
-
-            /* 4. Nullable changes last */
-            if (cd->nullable_changed) {
-                generate_alter_column_nullable_sql(sb, td->table_name, cd, opts);
-                sb_append(sb, "\n");
-                stmt_count++;
-            }
-        }
-
-        /* Handle constraint changes */
-        for (ConstraintDiff *cd = td->constraints_removed; cd; cd = cd->next) {
-            generate_drop_constraint_sql(sb, td->table_name, cd->constraint_name, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-            migration->has_destructive_changes = true;
-        }
-
-        for (ConstraintDiff *cd = td->constraints_added; cd; cd = cd->next) {
-            generate_add_constraint_sql(sb, td->table_name, cd, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-        }
-
-        for (ConstraintDiff *cd = td->constraints_modified; cd; cd = cd->next) {
-            /* Drop old constraint and add new one */
-            if (cd->constraint_name) {
-                generate_drop_constraint_sql(sb, td->table_name, cd->constraint_name, opts);
-                sb_append(sb, "\n");
-                stmt_count++;
-            }
-
-            generate_add_constraint_sql(sb, td->table_name, cd, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-        }
-    }
-
-    /* Fourth pass: add all foreign key constraints for newly created tables */
-    if (opts->add_comments) {
-        sb_append(sb, "-- Add foreign key constraints for new tables\n\n");
-    }
-
-    for (TableDiff *td = diff->table_diffs; td; td = td->next) {
-        if (td->table_added && td->target_table) {
-            generate_foreign_key_constraints(sb, td->target_table, opts);
-            sb_append(sb, "\n");
-            stmt_count++;
-        }
-    }
+    /* Future: Generate type, function, procedure migrations */
 
     /* Commit transaction */
     if (opts->use_transactions) {
