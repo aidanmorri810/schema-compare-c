@@ -25,6 +25,7 @@ void run_db_reader_tests(void);
 void run_compare_columns_tests(void);
 void run_compare_constraints_tests(void);
 void run_compare_schema_tests(void);
+void run_type_integration_tests(void);
 /* Add more test suite declarations here */
 
 /* Global filter variables (defined in test_framework.c) */
@@ -67,6 +68,7 @@ static void list_test_suites(void) {
     printf("  - compare_columns\n");
     printf("  - compare_constraints\n");
     printf("  - compare_schema\n");
+    printf("  - type_integration\n");
 }
 
 int main(int argc, char **argv) {
@@ -156,6 +158,7 @@ int main(int argc, char **argv) {
     run_compare_columns_tests();
     run_compare_constraints_tests();
     run_compare_schema_tests();
+    run_type_integration_tests();
     /* Add more test suite calls here */
 
     /* Print summary */

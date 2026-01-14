@@ -44,7 +44,29 @@ void parser_parse_statement(Parser *parser, Schema *schema) {
         return;
     }
 
-    /* Future: TOKEN_TYPE, TOKEN_INDEX, TOKEN_FUNCTION, etc. */
+    if (parser_check(parser, TOKEN_TYPE)) {
+        /* Back up to before CREATE */
+        parser->current = parser->previous;
+        parser->previous.type = TOKEN_ERROR;
+
+        CreateTypeStmt *type = parser_parse_create_type(parser);
+        if (!type) {
+            return;
+        }
+
+        /* Resize types array if needed */
+        CreateTypeStmt **new_types = mem_realloc(parser->memory_ctx, schema->types,
+                                                 (schema->type_count + 1) * sizeof(CreateTypeStmt *));
+        if (!new_types) {
+            parser_error(parser, "Out of memory");
+            return;
+        }
+        schema->types = new_types;
+        schema->types[schema->type_count++] = type;
+        return;
+    }
+
+    /* Future: TOKEN_INDEX, TOKEN_FUNCTION, etc. */
 
     parser_error(parser, "Unknown CREATE statement type");
 }

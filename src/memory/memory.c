@@ -1207,3 +1207,180 @@ void memory_context_stats(MemoryContext *ctx) {
     printf("  Blocks: %zu\n", ctx->block_count);
     printf("  Total allocated: %zu bytes\n", ctx->total_allocated);
 }
+
+/* ========== CreateTypeStmt Memory Management ========== */
+
+/* Allocate a CreateTypeStmt */
+CreateTypeStmt *create_type_stmt_alloc(MemoryContext *ctx) {
+    CreateTypeStmt *stmt = mem_alloc(ctx, sizeof(CreateTypeStmt));
+    if (stmt) {
+        memset(stmt, 0, sizeof(CreateTypeStmt));
+    }
+    return stmt;
+}
+
+/* Free a CreateTypeStmt */
+void free_create_type_stmt(CreateTypeStmt *stmt) {
+    if (!stmt) {
+        return;
+    }
+
+    free(stmt->type_name);
+
+    switch (stmt->variant) {
+        case TYPE_VARIANT_ENUM:
+            if (stmt->type_def.enum_def.labels) {
+                for (int i = 0; i < stmt->type_def.enum_def.label_count; i++) {
+                    free(stmt->type_def.enum_def.labels[i]);
+                }
+                free(stmt->type_def.enum_def.labels);
+            }
+            break;
+
+        case TYPE_VARIANT_COMPOSITE: {
+            CompositeAttribute *attr = stmt->type_def.composite_def.attributes;
+            while (attr) {
+                CompositeAttribute *next = attr->next;
+                free(attr->attr_name);
+                free(attr->data_type);
+                free(attr->collation);
+                free(attr);
+                attr = next;
+            }
+            break;
+        }
+
+        case TYPE_VARIANT_RANGE:
+            free(stmt->type_def.range_def.subtype);
+            free(stmt->type_def.range_def.subtype_opclass);
+            free(stmt->type_def.range_def.collation);
+            free(stmt->type_def.range_def.canonical_function);
+            free(stmt->type_def.range_def.subtype_diff_function);
+            free(stmt->type_def.range_def.multirange_type_name);
+            break;
+
+        case TYPE_VARIANT_BASE:
+            free(stmt->type_def.base_def.input_function);
+            free(stmt->type_def.base_def.output_function);
+            free(stmt->type_def.base_def.receive_function);
+            free(stmt->type_def.base_def.send_function);
+            free(stmt->type_def.base_def.typmod_in_function);
+            free(stmt->type_def.base_def.typmod_out_function);
+            free(stmt->type_def.base_def.analyze_function);
+            free(stmt->type_def.base_def.like_type);
+            free(stmt->type_def.base_def.default_value);
+            free(stmt->type_def.base_def.element_type);
+            free(stmt->type_def.base_def.collatable);
+            break;
+    }
+
+    free(stmt);
+}
+
+/* Clone a CreateTypeStmt */
+CreateTypeStmt *clone_create_type_stmt(const CreateTypeStmt *src, MemoryContext *ctx) {
+    if (!src) {
+        return NULL;
+    }
+
+    CreateTypeStmt *dst = create_type_stmt_alloc(ctx);
+    if (!dst) {
+        return NULL;
+    }
+
+    dst->type_name = src->type_name ? mem_strdup(ctx, src->type_name) : NULL;
+    dst->variant = src->variant;
+    dst->if_not_exists = src->if_not_exists;
+
+    switch (src->variant) {
+        case TYPE_VARIANT_ENUM:
+            dst->type_def.enum_def.label_count = src->type_def.enum_def.label_count;
+            if (src->type_def.enum_def.label_count > 0 && src->type_def.enum_def.labels) {
+                dst->type_def.enum_def.labels = mem_alloc(ctx,
+                    src->type_def.enum_def.label_count * sizeof(char *));
+                for (int i = 0; i < src->type_def.enum_def.label_count; i++) {
+                    dst->type_def.enum_def.labels[i] =
+                        mem_strdup(ctx, src->type_def.enum_def.labels[i]);
+                }
+            }
+            break;
+
+        case TYPE_VARIANT_COMPOSITE: {
+            dst->type_def.composite_def.attribute_count = src->type_def.composite_def.attribute_count;
+            CompositeAttribute *src_attr = src->type_def.composite_def.attributes;
+            CompositeAttribute **dst_attr_ptr = &dst->type_def.composite_def.attributes;
+
+            while (src_attr) {
+                CompositeAttribute *new_attr = mem_alloc(ctx, sizeof(CompositeAttribute));
+                new_attr->attr_name = mem_strdup(ctx, src_attr->attr_name);
+                new_attr->data_type = mem_strdup(ctx, src_attr->data_type);
+                new_attr->collation = src_attr->collation ? mem_strdup(ctx, src_attr->collation) : NULL;
+                new_attr->next = NULL;
+
+                *dst_attr_ptr = new_attr;
+                dst_attr_ptr = &new_attr->next;
+                src_attr = src_attr->next;
+            }
+            break;
+        }
+
+        case TYPE_VARIANT_RANGE:
+            dst->type_def.range_def.subtype = src->type_def.range_def.subtype ?
+                mem_strdup(ctx, src->type_def.range_def.subtype) : NULL;
+            dst->type_def.range_def.subtype_opclass = src->type_def.range_def.subtype_opclass ?
+                mem_strdup(ctx, src->type_def.range_def.subtype_opclass) : NULL;
+            dst->type_def.range_def.collation = src->type_def.range_def.collation ?
+                mem_strdup(ctx, src->type_def.range_def.collation) : NULL;
+            dst->type_def.range_def.canonical_function = src->type_def.range_def.canonical_function ?
+                mem_strdup(ctx, src->type_def.range_def.canonical_function) : NULL;
+            dst->type_def.range_def.subtype_diff_function = src->type_def.range_def.subtype_diff_function ?
+                mem_strdup(ctx, src->type_def.range_def.subtype_diff_function) : NULL;
+            dst->type_def.range_def.multirange_type_name = src->type_def.range_def.multirange_type_name ?
+                mem_strdup(ctx, src->type_def.range_def.multirange_type_name) : NULL;
+            break;
+
+        case TYPE_VARIANT_BASE:
+            dst->type_def.base_def.input_function = src->type_def.base_def.input_function ?
+                mem_strdup(ctx, src->type_def.base_def.input_function) : NULL;
+            dst->type_def.base_def.output_function = src->type_def.base_def.output_function ?
+                mem_strdup(ctx, src->type_def.base_def.output_function) : NULL;
+            dst->type_def.base_def.receive_function = src->type_def.base_def.receive_function ?
+                mem_strdup(ctx, src->type_def.base_def.receive_function) : NULL;
+            dst->type_def.base_def.send_function = src->type_def.base_def.send_function ?
+                mem_strdup(ctx, src->type_def.base_def.send_function) : NULL;
+            dst->type_def.base_def.typmod_in_function = src->type_def.base_def.typmod_in_function ?
+                mem_strdup(ctx, src->type_def.base_def.typmod_in_function) : NULL;
+            dst->type_def.base_def.typmod_out_function = src->type_def.base_def.typmod_out_function ?
+                mem_strdup(ctx, src->type_def.base_def.typmod_out_function) : NULL;
+            dst->type_def.base_def.analyze_function = src->type_def.base_def.analyze_function ?
+                mem_strdup(ctx, src->type_def.base_def.analyze_function) : NULL;
+
+            dst->type_def.base_def.internallength = src->type_def.base_def.internallength;
+            dst->type_def.base_def.is_variable_length = src->type_def.base_def.is_variable_length;
+            dst->type_def.base_def.has_internallength = src->type_def.base_def.has_internallength;
+            dst->type_def.base_def.passedbyvalue = src->type_def.base_def.passedbyvalue;
+            dst->type_def.base_def.has_passedbyvalue = src->type_def.base_def.has_passedbyvalue;
+            dst->type_def.base_def.alignment = src->type_def.base_def.alignment;
+            dst->type_def.base_def.has_alignment = src->type_def.base_def.has_alignment;
+            dst->type_def.base_def.storage = src->type_def.base_def.storage;
+            dst->type_def.base_def.has_storage = src->type_def.base_def.has_storage;
+
+            dst->type_def.base_def.like_type = src->type_def.base_def.like_type ?
+                mem_strdup(ctx, src->type_def.base_def.like_type) : NULL;
+            dst->type_def.base_def.category = src->type_def.base_def.category;
+            dst->type_def.base_def.has_category = src->type_def.base_def.has_category;
+            dst->type_def.base_def.preferred = src->type_def.base_def.preferred;
+            dst->type_def.base_def.has_preferred = src->type_def.base_def.has_preferred;
+            dst->type_def.base_def.default_value = src->type_def.base_def.default_value ?
+                mem_strdup(ctx, src->type_def.base_def.default_value) : NULL;
+            dst->type_def.base_def.element_type = src->type_def.base_def.element_type ?
+                mem_strdup(ctx, src->type_def.base_def.element_type) : NULL;
+            dst->type_def.base_def.delimiter = src->type_def.base_def.delimiter;
+            dst->type_def.base_def.has_delimiter = src->type_def.base_def.has_delimiter;
+            dst->type_def.base_def.collatable = src->type_def.base_def.collatable ?
+                mem_strdup(ctx, src->type_def.base_def.collatable) : NULL;
+            break;
+    }
+
+    return dst;
+}

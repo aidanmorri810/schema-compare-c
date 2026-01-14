@@ -3,6 +3,7 @@
 
 #include "pg_schema.h"
 #include "pg_create_table.h"
+#include "pg_create_type.h"
 #include "lexer.h"
 #include "sc_memory.h"
 #include <stdbool.h>
@@ -81,6 +82,9 @@ bool parse_constraint_attributes(Parser *parser, ColumnConstraint *constraint);
 /* parse_column.c */
 ColumnDef *parse_column_def(Parser *parser);
 char *parse_data_type(Parser *parser);
+
+/* parse_type.c */
+CreateTypeStmt *parser_parse_create_type(Parser *parser);
 
 
 #endif /* PARSER_H */

@@ -2,6 +2,7 @@
 #define SC_MEMORY_H
 
 #include "pg_create_table.h"
+#include "pg_create_type.h"
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -42,6 +43,15 @@ void free_storage_parameter_list(StorageParameterList *params);
 /* Deep copy functions for comparison */
 CreateTableStmt *clone_create_table_stmt(const CreateTableStmt *src, MemoryContext *ctx);
 ColumnDef *clone_column_def(const ColumnDef *src, MemoryContext *ctx);
+
+/* CreateTypeStmt construction helpers */
+CreateTypeStmt *create_type_stmt_alloc(MemoryContext *ctx);
+
+/* CreateTypeStmt destruction */
+void free_create_type_stmt(CreateTypeStmt *stmt);
+
+/* Deep copy functions for types */
+CreateTypeStmt *clone_create_type_stmt(const CreateTypeStmt *src, MemoryContext *ctx);
 
 /* Memory statistics (for debugging) */
 size_t memory_context_get_allocated(MemoryContext *ctx);
